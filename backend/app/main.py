@@ -133,16 +133,15 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content={"detail": errors, "error": {"message": "Request validation failed."}},
     )
 
-# Configure CORS from ALLOWED_ORIGINS (comma-separated or JSON list).
-# Specific origins are required when allow_credentials=True; wildcard * is dropped.
-cors_origins = settings.origins_list
+# Configure CORS from ALLOWED_ORIGINS and regex for hosted/local environments
+cors_origins = getattr(settings, "origins_list", []) or []
 if not cors_origins:
-    logger.warning("ALLOWED_ORIGINS is empty; browser CORS requests will be rejected")
+    logger.warning("ALLOWED_ORIGINS is empty; relying on allow_origin_regex")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|10\.0\.2\.2)(:\d+)?",
+    allow_origin_regex=r"https?://.*\.onrender\.com|https?://(localhost|127\.0\.0\.1|10\.0\.2\.2)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
