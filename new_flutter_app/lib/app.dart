@@ -153,6 +153,9 @@ class _FitNovaAppState extends State<FitNovaApp> {
           debugShowCheckedModeBanner: false,
           theme: AppTheme.darkTheme(accentTheme: accent),
           themeMode: ThemeMode.dark,
+          darkTheme: ThemeData.dark().copyWith(
+            scaffoldBackgroundColor: const Color(0xFF121212),
+            cardTheme: const CardThemeData(color: Color(0xFF1E1E1E)),),
           home: _restoringSession
               ? const Scaffold(
                   backgroundColor: AppTheme.background,
