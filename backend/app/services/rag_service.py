@@ -3,6 +3,7 @@ import re
 import sqlite3
 from contextlib import closing
 from typing import Any, AsyncGenerator, Dict, List, Optional
+import logging
 
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
@@ -95,14 +96,14 @@ def _food_query_from_text(query: str) -> str:
     ]
     return " ".join(words) or "chicken"
 
-
 @tool
 def search_food_macros(food_query: str) -> str:
     """Search the local nutrition database for food macros."""
     db_path = settings.SQLITE_DB_PATH
     clean_query = normalize_roman_urdu(food_query)
     try:
-        with closing(sqlite3.connect(db_path)) as connection:
+        # Connect in read-only mode using SQLite URI syntax
+        with closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)) as connection:
             cursor = connection.cursor()
             cursor.execute(
                 """
@@ -126,7 +127,7 @@ def search_food_macros(food_query: str) -> str:
     macros = {name: f"{amount} {unit}" for _, amount, name, unit in rows}
     return f"Food: {food_name} | Macros (per 100g): {macros}"
 
-
+logger = logging.getLogger(__name__)
 class RAGService:
     def __init__(
         self,
@@ -296,10 +297,12 @@ class RAGService:
                 session_id=session_id,
                 user_id=user_id,
             )
-        except Exception:
+        
+        except Exception as e:
+            logger.exception(f"Streaming failed due to: {e}")
             payload = json.dumps({
-                "content": "The AI coach is busy right now. Please wait a moment and try again."
-            })
+        "content": "The AI coach is busy right now. Please wait a moment and try again."
+    })
             yield f"data: {payload}\n\n"
             return
         answer = result["answer"]
