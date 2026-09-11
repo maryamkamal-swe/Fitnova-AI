@@ -1,0 +1,14 @@
+[
+  {"id": "ex001", "name": "Push-up", "muscle_groups": ["chest", "triceps", "shoulders"], "equipment": "home", "difficulty": "beginner", "exercise_type": "compound"},
+  {"id": "ex002", "name": "Bodyweight Squat", "muscle_groups": ["quads", "glutes"], "equipment": "home", "difficulty": "beginner", "exercise_type": "compound"},
+  {"id": "ex003", "name": "Dumbbell Row", "muscle_groups": ["back", "biceps"], "equipment": "home", "difficulty": "beginner", "exercise_type": "compound"},
+  {"id": "ex004", "name": "Plank", "muscle_groups": ["core"], "equipment": "home", "difficulty": "beginner", "exercise_type": "isolation"},
+  {"id": "ex005", "name": "Dumbbell Shoulder Press", "muscle_groups": ["shoulders", "triceps"], "equipment": "home", "difficulty": "intermediate", "exercise_type": "compound"},
+  {"id": "ex006", "name": "Bulgarian Split Squat", "muscle_groups": ["quads", "glutes"], "equipment": "home", "difficulty": "intermediate", "exercise_type": "compound"},
+  {"id": "ex007", "name": "Barbell Bench Press", "muscle_groups": ["chest", "triceps", "shoulders"], "equipment": "gym", "difficulty": "intermediate", "exercise_type": "compound"},
+  {"id": "ex008", "name": "Barbell Back Squat", "muscle_groups": ["quads", "glutes", "core"], "equipment": "gym", "difficulty": "intermediate", "exercise_type": "compound"},
+  {"id": "ex009", "name": "Deadlift", "muscle_groups": ["back", "glutes", "hamstrings"], "equipment": "gym", "difficulty": "advanced", "exercise_type": "compound"},
+  {"id": "ex010", "name": "Lat Pulldown", "muscle_groups": ["back", "biceps"], "equipment": "gym", "difficulty": "beginner", "exercise_type": "compound"},
+  {"id": "ex011", "name": "Leg Press", "muscle_groups": ["quads", "glutes"], "equipment": "gym", "difficulty": "beginner", "exercise_type": "compound"},
+  {"id": "ex012", "name": "Cable Tricep Pushdown", "muscle_groups": ["triceps"], "equipment": "gym", "difficulty": "beginner", "exercise_type": "isolation"}
+]

@@ -1,0 +1,10 @@
+# Frontend ignores
+.DS_Store
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+devtools_options.yaml
+# Widget Preview related
+.widget_preview/
