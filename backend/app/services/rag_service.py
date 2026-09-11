@@ -1,9 +1,9 @@
 import json
+import logging
 import re
 import sqlite3
 from contextlib import closing
 from typing import Any, AsyncGenerator, Dict, List, Optional
-import logging
 
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
@@ -16,6 +16,7 @@ from app.config import settings
 from app.database import MongoChatMessageHistory
 from app.db.chroma import get_vector_store
 
+logger = logging.getLogger(__name__)
 
 OUT_OF_SCOPE_PATTERN = re.compile(
     r"\b(weather|forecast|temperature|rain|python|code|coding|javascript|"
@@ -49,6 +50,7 @@ def validate_user_prompt(prompt: str) -> bool:
         PROMPT_INJECTION_PATTERN.search(prompt)
         or MALICIOUS_INSTRUCTION_PATTERN.search(prompt)
     )
+
 
 ROMAN_URDU_REPLACEMENTS = {
     r"\bweight loose\b": "weight loss",
@@ -96,13 +98,13 @@ def _food_query_from_text(query: str) -> str:
     ]
     return " ".join(words) or "chicken"
 
+
 @tool
 def search_food_macros(food_query: str) -> str:
     """Search the local nutrition database for food macros."""
     db_path = settings.SQLITE_DB_PATH
     clean_query = normalize_roman_urdu(food_query)
     try:
-        # Connect in read-only mode using SQLite URI syntax
         with closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)) as connection:
             cursor = connection.cursor()
             cursor.execute(
@@ -127,7 +129,7 @@ def search_food_macros(food_query: str) -> str:
     macros = {name: f"{amount} {unit}" for _, amount, name, unit in rows}
     return f"Food: {food_name} | Macros (per 100g): {macros}"
 
-logger = logging.getLogger(__name__)
+
 class RAGService:
     def __init__(
         self,
@@ -141,15 +143,11 @@ class RAGService:
         )
         self.max_history_messages = max_history_messages
 
-        llm = ChatGroq(
+        self.llm = ChatGroq(
             model=settings.GROQ_MODEL,
             groq_api_key=settings.GROQ_API_KEY,
             temperature=0.1,
         )
-        # Macro lookups are executed explicitly before the chain so the final
-        # answer model receives their results as context instead of returning
-        # an empty tool-call message.
-        self.llm = llm
         self.vector_store = get_vector_store(
             collection_name=self.collection_name,
             persist_directory=self.persist_directory,
@@ -222,6 +220,12 @@ class RAGService:
         await history.aget_messages()
         return history
 
+    def _format_profile(self, user_profile: Dict[str, Any]) -> str:
+        return "\n".join(
+            f"{key.replace('_', ' ').capitalize()}: {val}"
+            for key, val in user_profile.items()
+        )
+
     async def agenerate_response(
         self,
         user_query: str,
@@ -239,6 +243,7 @@ class RAGService:
         history = await self._history(owner_id, session_id)
         tool_sources: List[Dict[str, Any]] = []
         tool_context = ""
+
         if any(
             keyword in cleaned_query
             for keyword in ("calorie", "protein", "nutrition", "carb", "fat", "gram")
@@ -252,16 +257,27 @@ class RAGService:
                 {"tool": "search_food_macros", "args": {"food_query": food_query}}
             )
 
-        result = await self.rag_chain.ainvoke(
-            {
-                "input": cleaned_query,
-                "user_profile": f"{user_profile}\nNutrition tool result: {tool_context}",
-                "chat_history": history.messages[-self.max_history_messages :],
+        profile_string = self._format_profile(user_profile)
+
+        try:
+            result = await self.rag_chain.ainvoke(
+                {
+                    "input": cleaned_query,
+                    "user_profile": f"{profile_string}\nNutrition tool result: {tool_context}",
+                    "chat_history": history.messages[-self.max_history_messages :],
+                }
+            )
+        except Exception as e:
+            logger.exception(f"agenerate_response failed: {e}")
+            return {
+                "answer": "The AI coach is busy right now. Please wait a moment and try again.",
+                "sources": [],
             }
-        )
+
         answer = result.get(
             "answer", "I do not have that specific information in my knowledge base."
         )
+
         sources = list(tool_sources)
         seen = set()
         for document in result.get("context", []):
@@ -290,24 +306,56 @@ class RAGService:
         session_id: str,
         user_id: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
+        """Stream genuine token chunks via Server-Sent Events (SSE)."""
+        if not validate_user_prompt(user_query) or self.is_query_off_topic(user_query):
+            yield f"data: {json.dumps({'content': OUT_OF_SCOPE_MESSAGE})}\n\n"
+            return
+
+        owner_id = user_id or "anonymous"
+        cleaned_query = normalize_roman_urdu(user_query)
+        history = await self._history(owner_id, session_id)
+        tool_context = ""
+
+        if any(
+            keyword in cleaned_query
+            for keyword in ("calorie", "protein", "nutrition", "carb", "fat", "gram")
+        ) or any(
+            replacement in cleaned_query
+            for replacement in ("egg", "chicken", "milk", "lentils", "rice", "potato")
+        ):
+            food_query = _food_query_from_text(cleaned_query)
+            tool_context = await search_food_macros.ainvoke(food_query)
+
+        profile_string = self._format_profile(user_profile)
+        full_answer_accumulator = []
+
         try:
-            result = await self.agenerate_response(
-                user_query=user_query,
-                user_profile=user_profile,
-                session_id=session_id,
-                user_id=user_id,
-            )
-        
+            async for chunk in self.rag_chain.astream(
+                {
+                    "input": cleaned_query,
+                    "user_profile": f"{profile_string}\nNutrition tool result: {tool_context}",
+                    "chat_history": history.messages[-self.max_history_messages :],
+                }
+            ):
+                token = ""
+                if isinstance(chunk, dict):
+                    token = chunk.get("answer") or ""
+                elif hasattr(chunk, "content"):
+                    token = chunk.content or ""
+
+                if token and isinstance(token, str):
+                    full_answer_accumulator.append(token)
+                    yield f"data: {json.dumps({'content': token})}\n\n"
+
+            complete_text = "".join(full_answer_accumulator)
+            if complete_text:
+                await history.aadd_messages(
+                    [HumanMessage(content=user_query), AIMessage(content=complete_text)]
+                )
+
         except Exception as e:
             logger.exception(f"Streaming failed due to: {e}")
-            payload = json.dumps({
-        "content": "The AI coach is busy right now. Please wait a moment and try again."
-    })
-            yield f"data: {payload}\n\n"
-            return
-        answer = result["answer"]
-        for token in re.findall(r"\S+\s*", answer):
-            yield f"data: {json.dumps({'content': token})}\n\n"
+            yield f"data: {json.dumps({'content': 'The AI coach encountered an issue. Please try again.'})}\n\n"
 
 
 rag_service = RAGService()
