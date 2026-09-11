@@ -1,16 +1,19 @@
 import os
 from typing import Optional
 from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEndpointEmbeddings
 from app.config import settings
 
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
 
-def get_embeddings() -> HuggingFaceEmbeddings:
-    return HuggingFaceEmbeddings(
-        model_name="BAAI/bge-base-en-v1.5",
-        encode_kwargs={"normalize_embeddings": True} 
+def get_embeddings() -> HuggingFaceEndpointEmbeddings:
+    """Initialize serverless cloud embeddings."""
+    return HuggingFaceEndpointEmbeddings(
+        model="BAAI/bge-base-en-v1.5",
+        task="feature-extraction",
+        huggingfacehub_api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN")
+        or getattr(settings, "HUGGINGFACEHUB_API_TOKEN", None),
     )
 
 
