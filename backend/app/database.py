@@ -182,6 +182,8 @@ async def get_user_profile(user_id: str) -> Optional[Dict[str, Any]]:
         for key in (
             "age",
             "gender",
+            "height",              # <-- Added
+            "weight",              # <-- Added
             "fitness_goal",
             "fitness_goals",
             "activity_level",

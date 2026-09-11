@@ -2,30 +2,33 @@
 Security utilities for authentication and authorization
 JWT token generation, password hashing, etc.
 """
+import bcrypt  # <-- Added raw bcrypt import
 from datetime import datetime, timedelta
 from typing import Optional
 from uuid import uuid4
 from jose import JWTError, jwt
-from passlib.context import CryptContext
+# from passlib.context import CryptContext  <-- REMOVED
 from fastapi import HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from ..config import settings
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 # Security scheme for JWT
 security = HTTPBearer()
 
-
 def hash_password(password: str) -> str:
-    """Hash a password using bcrypt"""
-    return pwd_context.hash(password)
-
+    """Hash a password using bcrypt directly"""
+    pwd_bytes = password.encode('utf-8')
+    salt = bcrypt.gensalt()
+    hashed_password = bcrypt.hashpw(password=pwd_bytes, salt=salt)
+    return hashed_password.decode('utf-8')
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against its hash"""
-    return pwd_context.verify(plain_password, hashed_password)
+    """Verify a password against its hash using bcrypt directly"""
+    password_byte_enc = plain_password.encode('utf-8')
+    hashed_password_bytes = hashed_password.encode('utf-8')
+    return bcrypt.checkpw(password=password_byte_enc, hashed_password=hashed_password_bytes)
+
+
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
