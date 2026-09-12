@@ -1,7 +1,8 @@
+# backend/app/models/user.py
 """
 User models and schemas
 """
-from pydantic import BaseModel, EmailStr, Field, validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 from enum import Enum
@@ -48,14 +49,16 @@ class UserProfile(BaseModel):
     dietary_preferences: Optional[List[str]] = []
     medical_conditions: Optional[List[str]] = []
     
-    @validator('height')
-    def validate_height(cls, v):
+    @field_validator('height')
+    @classmethod
+    def validate_height(cls, v: float) -> float:
         if v < 50 or v > 300:
             raise ValueError('Height must be between 50-300 cm')
         return v
     
-    @validator('weight')
-    def validate_weight(cls, v):
+    @field_validator('weight')
+    @classmethod
+    def validate_weight(cls, v: float) -> float:
         if v < 20 or v > 300:
             raise ValueError('Weight must be between 20-300 kg')
         return v
@@ -67,8 +70,9 @@ class UserCreate(BaseModel):
     password: str = Field(..., min_length=8, max_length=100)
     profile: Optional[UserProfile] = None
     
-    @validator('password')
-    def validate_password(cls, v):
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, v: str) -> str:
         if not any(char.isdigit() for char in v):
             raise ValueError('Password must contain at least one digit')
         if not any(char.isupper() for char in v):
@@ -91,8 +95,8 @@ class UserResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "id": "507f1f77bcf86cd799439011",
                 "email": "user@example.com",
@@ -110,6 +114,7 @@ class UserResponse(BaseModel):
                 "updated_at": "2026-08-12T10:00:00"
             }
         }
+    )
 
 
 class UserUpdate(BaseModel):

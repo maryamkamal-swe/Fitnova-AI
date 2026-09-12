@@ -1,3 +1,4 @@
+# new_flutter_app/pubspec.yaml
 name: fitnova_app
 description: FitNova AI Flutter application
 
@@ -19,14 +20,14 @@ dependencies:
   provider: ^6.1.2
   flutter_secure_storage: ^9.2.2
   shared_preferences: ^2.2.3
-  firebase_core: ^3.1.0
-  firebase_messaging: ^15.0.0
   fl_chart: ^0.68.0
   audioplayers: ^6.1.0
-  record: ^5.1.2
+  record: ^7.1.1
 
 dev_dependencies:
   flutter_test:
+    sdk: flutter
+  integration_test:
     sdk: flutter
   flutter_lints: ^4.0.0
 

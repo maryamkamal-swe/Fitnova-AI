@@ -1,51 +1,46 @@
-"""
-Voice Interaction API Routes
-Handles speech-to-text, text-to-speech, and multilingual voice interactions
-"""
+# backend/app/routes/voice.py
 import asyncio
-from fastapi import APIRouter, HTTPException, Depends, Request, status
-from pydantic import BaseModel, Field
-from typing import Optional
 import base64
 import io
 import logging
+from typing import Optional
 
-from ..voice import translator
-import speech_recognition as sr
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from gtts import gTTS
-from ..services.llm_service import get_chatbot_response
-from ..utils.security import get_current_user
-from ..services.rag_service import SAFETY_RESPONSE, validate_user_prompt
+from pydantic import BaseModel, Field
+import speech_recognition as sr
+
 from ..core.limiter import limiter
+from ..services.rag_service import SAFETY_RESPONSE, validate_user_prompt
+from ..utils.security import get_current_user
+from ..voice import translator
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/voice", tags=["Voice Interaction"])
-MAX_AUDIO_BASE64_BYTES = 10 * 1024 * 1024
+
+# Base64 inflates byte size by ~33%. To allow 10MB of raw audio, the string length must accommodate ~13.4M chars.
+MAX_AUDIO_BASE64_CHARS = 14_000_000  
 
 
 class VoiceTranscribeRequest(BaseModel):
-    """Request model for voice transcription"""
-    audio_data: str = Field(..., max_length=MAX_AUDIO_BASE64_BYTES, description="Base64 encoded audio data (WAV format)")
+    audio_data: str = Field(..., max_length=MAX_AUDIO_BASE64_CHARS, description="Base64 encoded audio data (WAV format)")
     language_code: str = Field(default="en-US", description="Language code for STT (e.g., en-US, ur-PK)")
 
 
 class VoiceTranscribeResponse(BaseModel):
-    """Response model for voice transcription"""
     transcribed_text: str
     language_code: str
     success: bool = True
 
 
 class VoiceChatRequest(BaseModel):
-    """Request model for voice-based chat"""
     text: str = Field(..., min_length=1, max_length=4_000, description="Transcribed text from user")
     language_code: str = Field(default="en", description="User's language code (e.g., en, ur, ar)")
     translate_to_english: bool = Field(default=False, description="Whether to translate input to English")
 
 
 class VoiceChatResponse(BaseModel):
-    """Response model for voice chat"""
     response_text: str
     response_audio: Optional[str] = Field(None, description="Base64 encoded audio response (MP3)")
     language_code: str
@@ -53,33 +48,34 @@ class VoiceChatResponse(BaseModel):
 
 
 class TextToSpeechRequest(BaseModel):
-    """Request model for text-to-speech conversion"""
     text: str = Field(..., min_length=1, max_length=4_000, description="Text to convert to speech")
     language_code: str = Field(default="en", description="Language code (e.g., en, ur, ar)")
 
 
 class TextToSpeechResponse(BaseModel):
-    """Response model for text-to-speech"""
     audio_data: str = Field(..., description="Base64 encoded audio (MP3 format)")
     language_code: str
     success: bool = True
 
 
 class LanguageListResponse(BaseModel):
-    """Response model for supported languages"""
     languages: dict
     total_count: int
 
 
 def _transcribe_audio(audio_data: str, language_code: str) -> str:
-    """Decode and transcribe WAV bytes in a worker thread."""
     try:
         audio_bytes = base64.b64decode(audio_data, validate=True)
     except (ValueError, base64.binascii.Error) as error:
         raise HTTPException(status_code=400, detail="audio_data must be valid base64") from error
+    
     recognizer = sr.Recognizer()
-    with sr.AudioFile(io.BytesIO(audio_bytes)) as source:
-        audio = recognizer.record(source)
+    try:
+        with sr.AudioFile(io.BytesIO(audio_bytes)) as source:
+            audio = recognizer.record(source)
+    except Exception as error:
+        raise HTTPException(status_code=400, detail="Invalid audio file format. Must be WAV.") from error
+        
     try:
         return recognizer.recognize_google(audio, language=language_code)
     except sr.UnknownValueError as error:
@@ -89,19 +85,19 @@ def _transcribe_audio(audio_data: str, language_code: str) -> str:
 
 
 def _synthesize_speech(text: str, language_code: str) -> str:
-    """Generate MP3 audio in a worker thread and return base64 content."""
+    clean_lang = language_code.split("-")[0].split("_")[0].lower()
     audio_buffer = io.BytesIO()
-    gTTS(text=text, lang=language_code).write_to_fp(audio_buffer)
+    try:
+        gTTS(text=text, lang=clean_lang).write_to_fp(audio_buffer)
+    except ValueError:
+        logger.warning(f"Language {clean_lang} not supported by TTS. Falling back to English.")
+        gTTS(text=text, lang="en").write_to_fp(audio_buffer)
+    
     return base64.b64encode(audio_buffer.getvalue()).decode("ascii")
 
 
 @router.get("/languages", response_model=LanguageListResponse)
 async def get_supported_languages():
-    """
-    Get list of all supported languages for voice interaction
-    
-    Returns language options with their STT and translation codes
-    """
     return {
         "languages": translator.LANGUAGE_OPTIONS,
         "total_count": len(translator.LANGUAGE_OPTIONS)
@@ -115,11 +111,6 @@ async def transcribe_audio(
     payload: VoiceTranscribeRequest,
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Transcribe audio to text using speech recognition
-    
-    Requires authentication. Accepts base64-encoded WAV audio data.
-    """
     try:
         logger.info(f"Transcription request from user {current_user['id']} in language {payload.language_code}")
         text = await asyncio.to_thread(
@@ -146,16 +137,6 @@ async def voice_chat(
     payload: VoiceChatRequest,
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Process voice chat interaction with multilingual support
-    
-    Flow:
-    1. Receives text (already transcribed or direct input)
-    2. Optionally translates to English if needed
-    3. Sends to AI chatbot
-    4. Translates response back to user's language
-    5. Returns text response (audio generation optional)
-    """
     try:
         language_code = (payload.language_code or "en").split("-")[0].split("_")[0].lower()
         logger.info(f"Voice chat from user {current_user['id']} in language {language_code}")
@@ -166,16 +147,14 @@ async def voice_chat(
                 language_code=language_code,
             )
         
-        # Step 1: Translate input to English if needed
         english_text = payload.text
         if payload.translate_to_english and language_code != "en":
             english_text = await asyncio.to_thread(
                 translator.translate_to_english, payload.text, language_code
             )
         
-        # Step 2: Get AI response using RAG service
-        from ..services.rag_service import rag_service
         from ..database import get_user_profile
+        from ..services.rag_service import rag_service
 
         user_id = current_user["id"]
         user_profile = await get_user_profile(user_id)
@@ -194,19 +173,18 @@ async def voice_chat(
         
         ai_response = result["answer"]
         
-        # Step 3: Translate response back if needed
         final_response = ai_response
         if language_code != "en":
             final_response = await asyncio.to_thread(
                 translator.translate_from_english, ai_response, language_code
             )
         
-        return {
-            "response_text": final_response,
-            "response_audio": None,
-            "language_code": language_code,
-            "success": True
-        }
+        return VoiceChatResponse(
+            response_text=final_response,
+            response_audio=None,
+            language_code=language_code,
+            success=True
+        )
         
     except Exception:
         logger.exception("Voice chat error")
@@ -223,11 +201,6 @@ async def text_to_speech(
     payload: TextToSpeechRequest,
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Convert text to speech audio
-    
-    Returns base64-encoded MP3 audio data
-    """
     try:
         language_code = (payload.language_code or "en").split("-")[0].split("_")[0].lower()
         logger.info(f"TTS request from user {current_user['id']} in language {language_code}")
@@ -239,7 +212,6 @@ async def text_to_speech(
             audio_data=encoded_audio,
             language_code=language_code,
         )
-        
     except HTTPException:
         raise
     except Exception:
@@ -252,9 +224,6 @@ async def text_to_speech(
 
 @router.get("/health")
 async def voice_health_check():
-    """
-    Health check for voice services
-    """
     return {
         "status": "healthy",
         "services": {

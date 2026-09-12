@@ -1,3 +1,4 @@
+// new_flutter_app/lib/app.dart
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
@@ -74,21 +75,24 @@ class _FitNovaAppState extends State<FitNovaApp> {
     if (valid) _loadProfileInBackground();
   }
 
+  // Fixed: Safely guards against missing exp claims and invalid base64 padding
   bool _hasValidJwtExpiry(String token) {
     try {
       final parts = token.split('.');
       if (parts.length != 3) return false;
-      final payload = jsonDecode(
-        utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))),
-      );
-      final expiry = payload is Map ? payload['exp'] : null;
-      return expiry is num &&
-          DateTime.fromMillisecondsSinceEpoch(expiry.toInt() * 1000)
-              .isAfter(DateTime.now());
-    } on FormatException {
-      return false;
-    } on TypeError {
-      return false;
+      
+      final payloadString = utf8.decode(base64Url.decode(base64Url.normalize(parts[1])));
+      final payload = jsonDecode(payloadString);
+      
+      if (payload is! Map || !payload.containsKey('exp')) return false;
+      
+      final expiry = payload['exp'];
+      if (expiry is! num) return false;
+      
+      return DateTime.fromMillisecondsSinceEpoch(expiry.toInt() * 1000)
+          .isAfter(DateTime.now());
+    } catch (_) {
+      return false; // Safely fail closed
     }
   }
 
@@ -153,9 +157,7 @@ class _FitNovaAppState extends State<FitNovaApp> {
           debugShowCheckedModeBanner: false,
           theme: AppTheme.darkTheme(accentTheme: accent),
           themeMode: ThemeMode.dark,
-          darkTheme: ThemeData.dark().copyWith(
-            scaffoldBackgroundColor: const Color(0xFF121212),
-            cardTheme: const CardThemeData(color: Color(0xFF1E1E1E)),),
+          darkTheme: AppTheme.darkTheme(accentTheme: accent),
           home: _restoringSession
               ? const Scaffold(
                   backgroundColor: AppTheme.background,

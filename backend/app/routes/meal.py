@@ -3,6 +3,7 @@ from datetime import date, datetime
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
+from bson.errors import InvalidId
 
 from app.database import get_database
 from app.models.meal import MealPlanRequest, MealPlanResponse
@@ -85,6 +86,8 @@ async def log_food_entry(
     return {"message": "Food logged successfully", "id": str(result.inserted_id)}
 
 
+
+
 @router.post("/food-log/{food_id}/favorite", status_code=status.HTTP_200_OK)
 async def toggle_favorite(
     food_id: str,
@@ -94,12 +97,18 @@ async def toggle_favorite(
     Add or remove a food item from favorites.
     """
     collection = get_database().food_logs
+    try:
+        oid = ObjectId(food_id)
+    except (InvalidId, TypeError) as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Food item not found") from error
+    
     result = await collection.update_one(
-        {"_id": ObjectId(food_id), "user_id": user_id},
-        {"$set": {"favorite": True, "updated_at": datetime.utcnow()}},
+        {"_id": oid, "user_id": user_id}, 
+        {"$set": {"favorite": True, "updated_at": datetime.utcnow()}}
     )
-    return {"message": "Food marked as favorite"}
-
+    if result.matched_count == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Food log entry not found")
+    return {"message": "Favorite status updated successfully"}
 
 @router.get("/meal-replacement", response_model=MealPlanResponse)
 async def get_meal_replacements(

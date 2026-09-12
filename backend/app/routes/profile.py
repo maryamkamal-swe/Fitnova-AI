@@ -65,7 +65,7 @@ async def update_profile(
     
     Requires authentication
     """
-    await auth_service.update_user_profile(user_id, profile_data.dict())
+    await auth_service.update_user_profile(user_id, profile_data.model_dump(mode="json"))
     return {"message": "Profile updated successfully"}
 
 

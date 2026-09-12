@@ -114,15 +114,18 @@ async def get_current_user(user_id: str = Depends(get_current_user_id)):
     return user
 
 
+import asyncio
+
 @router.post("/send-otp")
 @limiter.limit("5/hour")
 async def send_otp(request: Request, payload: SendOtpRequest):
     """Send a rate-limited 6-digit email OTP."""
-    return issue_otp(str(payload.email))
+    return await asyncio.to_thread(issue_otp, str(payload.email))
 
 
 @router.post("/verify-otp")
 @limiter.limit("10/hour")
+
 async def verify_email_otp(request: Request, payload: VerifyOtpRequest):
     """Confirm a previously issued OTP."""
     if not verify_otp(str(payload.email), payload.otp):

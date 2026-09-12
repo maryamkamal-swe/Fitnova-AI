@@ -1,3 +1,4 @@
+# backend/app/services/rag_indexer.py
 import csv
 import hashlib
 import json
@@ -69,8 +70,12 @@ def _read_csv_file(path: Path) -> List[Document]:
 def _read_json_file(path: Path) -> List[Document]:
     with open(path, "r", encoding="utf-8") as file:
         data = json.load(file)
+    
     if isinstance(data, dict):
         data = [data]
+    elif not isinstance(data, list):
+        data = [{"content": data}]
+        
     return [
         Document(
             page_content=json.dumps(item, ensure_ascii=False),
@@ -143,7 +148,6 @@ def index_directory(directory: str = "data", batch_size: int = 250) -> None:
 
 
 def index_knowledge_base(directory: str = "data") -> None:
-    """Compatibility entry point used by the existing services package."""
     index_directory(directory)
 
 

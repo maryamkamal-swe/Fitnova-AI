@@ -26,7 +26,7 @@ class _NutritionScreenState extends State<NutritionScreen> {
 
   double get _calories =>
       _todayProgress?.caloriesConsumed ??
-      _foods.fold(0, (total, food) => total + food.calories);
+      _foods.fold<double>(0.0, (total, food) => total + food.calories);
 
   @override
   void initState() {

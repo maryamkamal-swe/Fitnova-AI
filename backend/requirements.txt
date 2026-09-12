@@ -36,9 +36,6 @@ click
 
 # Voice Interaction Features
 SpeechRecognition==3.17.0
-PyAudio==0.2.14
-pyttsx3==2.90
 gTTS
 deep-translator==1.11.4
 langdetect==1.0.9
-playsound==1.2.2

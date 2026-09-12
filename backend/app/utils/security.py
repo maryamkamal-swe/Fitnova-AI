@@ -1,49 +1,31 @@
-"""
-Security utilities for authentication and authorization
-JWT token generation, password hashing, etc.
-"""
-import bcrypt  # <-- Added raw bcrypt import
+# backend/app/utils/security.py
+import bcrypt
 from datetime import datetime, timedelta
 from typing import Optional
 from uuid import uuid4
 from jose import JWTError, jwt
-# from passlib.context import CryptContext  <-- REMOVED
 from fastapi import HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from ..config import settings
 
-# Security scheme for JWT
 security = HTTPBearer()
 
 def hash_password(password: str) -> str:
-    """Hash a password using bcrypt directly"""
     pwd_bytes = password.encode('utf-8')
     salt = bcrypt.gensalt()
     hashed_password = bcrypt.hashpw(password=pwd_bytes, salt=salt)
     return hashed_password.decode('utf-8')
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against its hash using bcrypt directly"""
     password_byte_enc = plain_password.encode('utf-8')
     hashed_password_bytes = hashed_password.encode('utf-8')
-    return bcrypt.checkpw(password=password_byte_enc, hashed_password=hashed_password_bytes)
-
-
-
+    try:
+        return bcrypt.checkpw(password=password_byte_enc, hashed_password=hashed_password_bytes)
+    except ValueError:
+        return False
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    """
-    Create JWT access token
-    
-    Args:
-        data: Payload data to encode in token
-        expires_delta: Optional custom expiration time
-    
-    Returns:
-        Encoded JWT token
-    """
     to_encode = data.copy()
-    
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
@@ -60,15 +42,6 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
 
 def create_refresh_token(data: dict) -> str:
-    """
-    Create JWT refresh token
-    
-    Args:
-        data: Payload data to encode in token
-    
-    Returns:
-        Encoded JWT refresh token
-    """
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     
@@ -84,18 +57,6 @@ def create_refresh_token(data: dict) -> str:
 
 
 def decode_token(token: str) -> dict:
-    """
-    Decode and verify JWT token
-    
-    Args:
-        token: JWT token to decode
-    
-    Returns:
-        Decoded token payload
-    
-    Raises:
-        HTTPException: If token is invalid or expired
-    """
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         return payload
@@ -108,19 +69,6 @@ def decode_token(token: str) -> dict:
 
 
 def get_current_user_id(credentials: HTTPAuthorizationCredentials = Security(security)) -> str:
-    """
-    Extract user ID from JWT token
-    Used as a dependency for protected routes
-    
-    Args:
-        credentials: HTTP Authorization credentials with bearer token
-    
-    Returns:
-        User ID from token
-    
-    Raises:
-        HTTPException: If token is invalid or missing user_id
-    """
     token = credentials.credentials
     payload = decode_token(token)
     
@@ -132,7 +80,6 @@ def get_current_user_id(credentials: HTTPAuthorizationCredentials = Security(sec
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    # Verify token type
     if payload.get("type") != "access":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -146,26 +93,12 @@ def get_current_user_id(credentials: HTTPAuthorizationCredentials = Security(sec
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Security(security),
 ) -> dict:
-    """Compatibility dependency for routes that need the authenticated user object."""
     return {"id": get_current_user_id(credentials)}
 
 
 def verify_refresh_token(token: str) -> str:
-    """
-    Verify refresh token and extract user ID
-    
-    Args:
-        token: Refresh token to verify
-    
-    Returns:
-        User ID from token
-    
-    Raises:
-        HTTPException: If token is invalid or not a refresh token
-    """
     payload = decode_token(token)
     
-    # Verify token type
     if payload.get("type") != "refresh":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

@@ -1,7 +1,8 @@
+# backend/app/models/progress.py
 """
 Progress tracking models
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional
 from datetime import date, datetime
 
@@ -20,8 +21,8 @@ class ProgressCreate(BaseModel):
     goal_completion: Optional[float] = Field(None, ge=0, le=100, description="Progress toward goal in percent")
     notes: Optional[str] = Field(None, max_length=500)
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "date": "2026-08-12",
                 "weight": 72.5,
@@ -36,6 +37,7 @@ class ProgressCreate(BaseModel):
                 "notes": "Felt great during workout!"
             }
         }
+    )
 
 
 class ProgressResponse(BaseModel):
@@ -55,8 +57,7 @@ class ProgressResponse(BaseModel):
     notes: Optional[str]
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ProgressStats(BaseModel):
@@ -74,8 +75,8 @@ class ProgressStats(BaseModel):
     avg_active_minutes: Optional[float]
     goal_completion_rate: Optional[float]
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "total_workouts": 15,
                 "total_days_tracked": 20,
@@ -91,6 +92,7 @@ class ProgressStats(BaseModel):
                 "goal_completion_rate": 76.5
             }
         }
+    )
 
 
 class ProgressUpdate(BaseModel):

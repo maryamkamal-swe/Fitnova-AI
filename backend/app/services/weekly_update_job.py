@@ -26,16 +26,34 @@ async def get_weekly_avg_weight_change(db, user_id: str) -> Optional[float]:
     returns the change between this week's average and last week's average.
     Pure aggregation -- no AI.
     """
-    cursor = db.progress_logs.find(
-        {"user_id": user_id, "metric": "weight"}
+    cursor = db.progress.find(
+        {"user_id": user_id, "weight": {"$ne": None}}
     ).sort("date", -1).limit(14)
     entries = [doc async for doc in cursor]
-    if len(entries) < 14:
-        return None  # not enough history yet to compute a trend safely
 
-    this_week = [e["value"] for e in entries[:7]]
-    last_week = [e["value"] for e in entries[7:14]]
-    return (sum(this_week) / 7) - (sum(last_week) / 7)
+    if len(entries) < 14:
+        cursor = db.progress_logs.find(
+            {"user_id": user_id, "metric": "weight"}
+        ).sort("date", -1).limit(14)
+        entries = [doc async for doc in cursor]
+
+    if len(entries) < 14:
+        return None
+
+    weights = [
+        doc["weight"] if doc.get("weight") is not None else doc.get("value")
+        for doc in entries
+    ]
+    if any(w is None for w in weights):
+        return None
+
+    this_week = weights[:7]
+    last_week = weights[7:14]
+
+    avg_this_week = sum(this_week) / len(this_week)
+    avg_last_week = sum(last_week) / len(last_week)
+
+    return avg_this_week - avg_last_week
 
 
 async def run_weekly_updates_for_user(db, user_id: str, default_location: WorkoutLocation, default_days_per_week: int = 3):
@@ -78,3 +96,4 @@ async def run_weekly_updates_for_user(db, user_id: str, default_location: Workou
 async def run_weekly_updates_for_all_users(db, default_location: WorkoutLocation = WorkoutLocation.HOME):
     async for user in db.users.find({}, {"_id": 1}):
         await run_weekly_updates_for_user(db, str(user["_id"]), default_location)
+

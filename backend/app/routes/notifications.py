@@ -109,5 +109,5 @@ async def send_notification(
         )
 
     response = notification_service._format_notification_response(notification)
-    notification_service.send_push_notification(user_id, response)
+    await notification_service.send_push_notification(user_id, response)
     return response

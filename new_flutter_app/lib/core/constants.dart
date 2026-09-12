@@ -8,7 +8,9 @@ class AppConstants {
   // Default Android Emulator URL.
   // For iOS Simulator or Desktop/Web, use 'http://127.0.0.1:8000' or 'http://localhost:8000'.
   // For Physical Device, use your local machine's IP (e.g. 'http://192.168.1.X:8000').
-  static const String defaultBaseUrl = 'http://127.0.0.1:8000';
+// Change this to your actual Render URL
+  // Change this to your actual Render API URL
+  static const String defaultBaseUrl = 'https://fitnova-ai-dv0n.onrender.com';
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
     defaultValue: defaultBaseUrl,

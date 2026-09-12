@@ -133,10 +133,10 @@ class VoiceService {
   }) async {
     final sttCode = languageCode.trim().isEmpty ? 'en-US' : languageCode.trim();
     final speakCode = _baseLanguageCode(sttCode);
-    final text = await transcribe(
-      audioData: audioData,
-      languageCode: sttCode,
-    );
+    final text = await transcribe(audioData: audioData, languageCode: sttCode);
+    if (text.trim().isEmpty) {
+      throw const ApiException(message: 'Could not recognize any speech. Please try speaking again.');
+    }
     final reply = await chat(
       text: text,
       languageCode: speakCode,

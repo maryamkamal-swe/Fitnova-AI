@@ -1,3 +1,4 @@
+// new_flutter_app/lib/services/api_client.dart
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -345,7 +346,6 @@ class ApiClient {
             return detail.trim();
           }
           if (detail is List && detail.isNotEmpty) {
-            // FastAPI 422 validation errors list
             final first = detail.first;
             if (first is Map && first.containsKey('msg')) {
               return first['msg'].toString();
@@ -357,6 +357,12 @@ class ApiClient {
           final msg = decoded['message'];
           if (msg is String && msg.trim().isNotEmpty) {
             return msg.trim();
+          }
+        }
+        if (decoded.containsKey('error') && decoded['error'] is Map) {
+          final errorObj = decoded['error'];
+          if (errorObj.containsKey('message') && errorObj['message'] is String) {
+            return errorObj['message'].toString().trim();
           }
         }
       }

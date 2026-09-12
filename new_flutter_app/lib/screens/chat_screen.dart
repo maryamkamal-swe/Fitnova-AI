@@ -1,3 +1,4 @@
+// new_flutter_app/lib/screens/chat_screen.dart
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -172,8 +173,9 @@ class _ChatScreenState extends State<ChatScreen> {
       _responseAudio = null;
     });
     try {
-      final language = _languages
-          .firstWhere(
+      final language = _languages.isEmpty 
+          ? 'en-US'
+          : _languages.firstWhere(
             (item) => item.translateCode == _languageCode,
             orElse: () => const VoiceLanguage(
               id: 'en',
@@ -181,8 +183,8 @@ class _ChatScreenState extends State<ChatScreen> {
               sttCode: 'en-US',
               translateCode: 'en',
             ),
-          )
-          .sttCode;
+          ).sttCode;
+          
       final reply = await _voiceService.sendVoiceMessage(
         audioData: audioData,
         languageCode: language,

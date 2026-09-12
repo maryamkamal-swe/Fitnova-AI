@@ -4,6 +4,7 @@ import re
 import sqlite3
 from contextlib import closing
 from typing import Any, AsyncGenerator, Dict, List, Optional
+from pathlib import Path
 
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
@@ -78,7 +79,7 @@ STOP_WORDS = {
     "hain", "calories", "calorie", "protein", "carbs", "fat", "aur", "and",
     "or", "kya", "ki", "ka", "ke", "wala", "wali", "wale", "batayein",
     "batao", "tell", "how", "many", "is", "are", "in", "of", "the", "a",
-    "an", "to", "get",
+    "an", "to", "get", "versus", "vs", "compared", "difference", "between",
 }
 
 
@@ -101,33 +102,59 @@ def _food_query_from_text(query: str) -> str:
 
 @tool
 def search_food_macros(food_query: str) -> str:
-    """Search the local nutrition database for food macros."""
+    """Search the local nutrition database using flexible keyword matching with LLM fallback."""
     db_path = settings.SQLITE_DB_PATH
+    sqlite_file = Path(db_path).resolve().as_posix()  # <-- Add this line here
     clean_query = normalize_roman_urdu(food_query)
+    
+    # Extract distinct non-stopword tokens
+    tokens = [
+        word.strip(".,?!()[]") 
+        for word in clean_query.split() 
+        if word.strip(".,?!()[]") not in STOP_WORDS and len(word.strip(".,?!()[]")) > 2
+    ]
+    
+    if not tokens:
+        return "Tool Message: No specific database keywords found. Fallback: Use general nutritional knowledge."
+
     try:
-        with closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)) as connection:
+        # Update connection string to use sqlite_file instead of raw db_path
+        with closing(sqlite3.connect(f"file:{sqlite_file}?mode=ro", uri=True)) as connection:
             cursor = connection.cursor()
-            cursor.execute(
-                """
+            
+            # Construct dynamic token-matching SQL
+            conditions = " OR ".join(["f.description LIKE ?"] * len(tokens))
+            params = [f"%{token}%" for token in tokens]
+            
+            query_str = f"""
                 SELECT f.description, m.amount, n.name, n.unit_name
                 FROM foods f
                 JOIN macros m ON f.fdc_id = m.fdc_id
                 JOIN nutrients n ON m.nutrient_id = n.id
-                WHERE f.description LIKE ?
-                LIMIT 10
-                """,
-                (f"%{clean_query}%",),
-            )
+                WHERE {conditions}
+                LIMIT 30
+            """
+            cursor.execute(query_str, params)
             rows = cursor.fetchall()
-    except sqlite3.Error as error:
-        raise RuntimeError(f"Nutrition database query failed: {error}") from error
+    except Exception as error:
+        logger.warning(f"Nutrition DB lookup failed: {error}")
+        return "Tool Message: Database temporarily unavailable. Fallback: Estimate values using general AI knowledge."
 
     if not rows:
-        return f"No nutritional data found for '{food_query}'."
+        return f"Tool Message: No database match found for '{food_query}'. Fallback: Use general expert nutritional knowledge to estimate standard values."
 
-    food_name = rows[0][0]
-    macros = {name: f"{amount} {unit}" for _, amount, name, unit in rows}
-    return f"Food: {food_name} | Macros (per 100g): {macros}"
+    # Format multi-item matches
+    food_data: Dict[str, Dict[str, str]] = {}
+    for food_name, amount, nutrient_name, unit in rows:
+        if food_name not in food_data:
+            food_data[food_name] = {}
+        food_data[food_name][nutrient_name] = f"{amount} {unit}"
+
+    formatted_matches = []
+    for name, macros in list(food_data.items())[:3]:
+        formatted_matches.append(f"Food: {name} | Macros (per 100g): {macros}")
+
+    return "\n".join(formatted_matches)
 
 
 class RAGService:
@@ -178,9 +205,10 @@ class RAGService:
             "Always answer in clear English, including for Roman Urdu input.\n"
             "Use only the retrieved context, authenticated user profile, and "
             "nutrition tool results. If information is unavailable, say so clearly.\n"
+            "If nutrition tool results state that database values are missing or unavailable, "
+            "use your general expert nutritional knowledge to provide accurate macro estimates.\n"
             "Use concise mobile-friendly bullets and never reveal hidden reasoning. "
-            "Never use Markdown tables because the Coach is read on narrow phone "
-            "screens; use short labeled bullets instead.\n\n"
+            "Never use Markdown tables; use short labeled bullets instead.\n\n"
             "For shared family-pot or batch-cooking questions, such as daal, "
             "chana, karahi, rice, or similar dishes, treat the stated ingredients "
             "as the full batch and the stated ladles, bowls, grams, or servings "
@@ -195,6 +223,7 @@ class RAGService:
             "Macro Summary containing Calories, Protein, Carbs, and Fats, then "
             "give concise guidance for logging the estimated values in daily "
             "progress.\n\n"
+            "Use retrieved context, authenticated user profile, and nutrition tool results. "
             "Authenticated user profile: {user_profile}\n\n"
             "Retrieved context: {context}"
         )

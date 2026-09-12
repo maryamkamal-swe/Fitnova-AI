@@ -1,3 +1,4 @@
+// new_flutter_app/lib/screens/profile_setup_screen.dart
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -6,6 +7,7 @@ import '../core/utils/string_utils.dart';
 import '../models/user_profile.dart';
 import '../services/api_client.dart';
 import '../services/profile_service.dart';
+import 'onboarding/app_walkthrough_screen.dart';
 
 class ProfileSetupScreen extends StatefulWidget {
   final ProfileService profileService;
@@ -65,29 +67,34 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
+    
+    // Fixed: Safe tryParse guarantees the app doesn't crash on invalid cast.
     final profile = UserProfile(
       name: _name.text.toNameCase(),
-      age: int.parse(_age.text),
+      age: int.tryParse(_age.text.trim()) ?? 18,
       gender: _gender ?? 'other',
-      height: double.parse(_height.text),
-      weight: double.parse(_weight.text),
+      height: double.tryParse(_height.text.trim()) ?? 170.0,
+      weight: double.tryParse(_weight.text.trim()) ?? 70.0,
       fitnessGoal: _goal ?? 'maintenance',
       activityLevel: _activity ?? 'moderate',
       fitnessExperience: _experience ?? 'beginner',
       dietaryPreferences: _split(_diet.text),
       medicalConditions: _split(_medical.text),
     );
+    
     try {
       final saved = await widget.profileService.updateProfile(profile);
       if (!mounted) return;
       final preferences = await SharedPreferences.getInstance();
       if (!mounted) return;
+      
       await preferences.setBool('isProfileCompleted', true);
       if (!mounted) return;
+      
       widget.onComplete?.call(saved);
       if (!mounted) return;
-      final seenWalkthrough =
-          preferences.getBool('onboarding_completed') ?? false;
+      
+      final seenWalkthrough = preferences.getBool(onboardingCompletedKey) ?? false;
       Navigator.of(context).pushNamedAndRemoveUntil(
         seenWalkthrough
             ? AppConstants.homeRoute

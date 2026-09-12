@@ -132,12 +132,13 @@ async def get_today_hydration(
     today = date.today()
     day_start = datetime.combine(today, datetime.min.time())
     day_end = day_start + timedelta(days=1)
+    
     entry = await collection.find_one({
         "user_id": user_id,
         "date": {"$gte": day_start, "$lt": day_end},
     })
     if not entry:
-        entry = await collection.find_one({"user_id": user_id, "date": today})
+        entry = await collection.find_one({"user_id": user_id, "date": day_start})
     if not entry:
         return {"liters": 0, "date": str(today)}
     return {"liters": entry.get("water_intake", 0), "date": str(entry.get("date", today))}
@@ -192,6 +193,8 @@ async def delete_progress(
     """
     await progress_service.delete_progress(progress_id, user_id)
     return {"message": "Progress entry deleted successfully"}
+
+
 @router.post("/hydration")
 async def log_hydration(
     hydration_data: HydrationLogRequest,
@@ -212,7 +215,10 @@ async def log_hydration(
 
     result = await collection.update_one(
         {"user_id": user_id, "date": entry_datetime},
-        {"$set": {"water_intake": hydration_data.liters, "updated_at": datetime.utcnow()}},
+        {
+            "$set": {"water_intake": hydration_data.liters, "updated_at": datetime.utcnow()},
+            "$setOnInsert": {"created_at": datetime.utcnow(), "workout_completed": False},
+        },
         upsert=True,
     )
     return {"message": "Hydration logged successfully", "liters": hydration_data.liters}

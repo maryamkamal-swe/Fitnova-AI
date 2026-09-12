@@ -1,3 +1,4 @@
+# backend/app/services/progress_service.py
 """
 Progress tracking service
 Handles progress data and statistics
@@ -66,7 +67,7 @@ class ProgressService:
         })
 
         if existing:
-            update_data = progress_data.dict(exclude_unset=True)
+            update_data = progress_data.model_dump(exclude_unset=True)
             await collection.update_one(
                 {"_id": existing["_id"]},
                 {"$set": update_data}
@@ -77,7 +78,7 @@ class ProgressService:
 
         progress_doc = {
             "user_id": user_id,
-            **progress_data.dict(),
+            **progress_data.model_dump(),
             "created_at": datetime.utcnow()
         }
         progress_doc["date"] = self._mongo_datetime(progress_doc["date"])
@@ -145,7 +146,7 @@ class ProgressService:
     ) -> ProgressResponse:
         """Update a progress entry."""
         collection = self._get_collection()
-        update_data = progress_data.dict(exclude_unset=True)
+        update_data = progress_data.model_dump(exclude_unset=True)
 
         if not update_data:
             raise HTTPException(

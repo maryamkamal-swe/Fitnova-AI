@@ -1,6 +1,5 @@
-"""Lightweight in-memory OTP store with optional SMTP delivery."""
+# backend/app/services/otp_service.py
 from __future__ import annotations
-
 import logging
 import secrets
 import smtplib
@@ -62,11 +61,16 @@ def send_otp_email(email: str, otp: str) -> bool:
     )
 
     try:
-        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15) as smtp:
-            if settings.SMTP_USE_TLS:
-                smtp.starttls()
-            smtp.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-            smtp.send_message(message)
+        if settings.SMTP_PORT == 465:
+            with smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15) as smtp:
+                smtp.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+                smtp.send_message(message)
+        else:
+            with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15) as smtp:
+                if settings.SMTP_USE_TLS:
+                    smtp.starttls()
+                smtp.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+                smtp.send_message(message)
         return True
     except Exception:
         logger.exception("Failed to send OTP email to %s", email)
@@ -76,11 +80,8 @@ def send_otp_email(email: str, otp: str) -> bool:
 
 
 def issue_otp(email: str) -> dict:
-    """Create and deliver an OTP. Never blocks registration in development."""
     otp = create_otp(email)
     delivered = send_otp_email(email, otp)
-    # Keep the code verifiable even when SMTP is unavailable. In development,
-    # the code is printed above so local registration is never blocked.
     auto_verified = False
     development_mode = settings.ENVIRONMENT.lower() == "development"
     response = {
