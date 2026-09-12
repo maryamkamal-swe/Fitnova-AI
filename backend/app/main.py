@@ -80,6 +80,7 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app
 app = FastAPI(
     title="FitNova AI API",
+    redirect_slashes=False,
     description="AI-powered personalized fitness and nutrition coaching system",
     version="1.0.0",
     docs_url=None if settings.ENVIRONMENT.strip().lower() in {"production", "prod"} else "/docs",
