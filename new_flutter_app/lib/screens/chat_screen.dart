@@ -39,7 +39,6 @@ class _ChatScreenState extends State<ChatScreen> {
   String _languageCode = 'en';
   bool _sending = false;
   bool _isRecording = false;
-  String? _responseAudio;
   final _audioPlayer = VoiceAudioPlayer();
   final AudioRecorder _recorder = AudioRecorder();
   String? _recordingPath;
@@ -83,7 +82,6 @@ class _ChatScreenState extends State<ChatScreen> {
         if (mounted) {
           setState(() {
             _waitingForFirstChunk = false;
-            _responseAudio = null;
             if (_messages.isEmpty || _messages.last.isUser) {
               _messages
                   .add(ChatMessage(text: buffer.toString(), isUser: false));
@@ -170,20 +168,19 @@ class _ChatScreenState extends State<ChatScreen> {
     if (audioData.isEmpty || _sending) return;
     setState(() {
       _sending = true;
-      _responseAudio = null;
     });
     try {
       final language = _languages.isEmpty 
           ? 'en-US'
           : _languages.firstWhere(
-            (item) => item.translateCode == _languageCode,
-            orElse: () => const VoiceLanguage(
-              id: 'en',
-              name: 'English',
-              sttCode: 'en-US',
-              translateCode: 'en',
-            ),
-          ).sttCode;
+              (item) => item.translateCode == _languageCode,
+              orElse: () => const VoiceLanguage(
+                id: 'en',
+                name: 'English',
+                sttCode: 'en-US',
+                translateCode: 'en',
+              ),
+            ).sttCode;
           
       final reply = await _voiceService.sendVoiceMessage(
         audioData: audioData,
@@ -193,11 +190,7 @@ class _ChatScreenState extends State<ChatScreen> {
       setState(() {
         _messages.add(ChatMessage(text: 'Voice message', isUser: true));
         _messages.add(ChatMessage(text: reply.responseText, isUser: false));
-        _responseAudio = reply.responseAudio;
       });
-      if (reply.responseAudio?.isNotEmpty == true) {
-        await _audioPlayer.play(reply.responseAudio!);
-      }
     } on ApiException catch (error) {
       _showError(error.message);
     } catch (_) {
@@ -208,6 +201,32 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<void> _playMessageAudio(String text) async {
+    try {
+      final language = _languages.isEmpty 
+          ? 'en-US'
+          : _languages.firstWhere(
+              (item) => item.translateCode == _languageCode,
+              orElse: () => const VoiceLanguage(
+                id: 'en',
+                name: 'English',
+                sttCode: 'en-US',
+                translateCode: 'en',
+              ),
+            ).sttCode;
+
+      final base64Audio = await _voiceService.textToSpeech(
+        text: text,
+        languageCode: language,
+      );
+      if (base64Audio.isNotEmpty) {
+        await _audioPlayer.play(base64Audio);
+      }
+    } catch (_) {
+      _showError('Unable to generate or play voice audio for this message.');
+    }
+  }
+
   void _showError(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -215,34 +234,34 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   MacroSummary? _macroSummary(String text) {
-  final match = RegExp(
-    r'(?:\*\*|__)?Calories(?:\*\*|__)?\s*:\s*([0-9]+(?:\.[0-9]+)?)\D+'
-    r'(?:\*\*|__)?Protein(?:\*\*|__)?\s*:\s*([0-9]+(?:\.[0-9]+)?)\D+'
-    r'(?:\*\*|__)?Carbs?(?:\*\*|__)?\s*:\s*([0-9]+(?:\.[0-9]+)?)\D+'
-    r'(?:\*\*|__)?Fats?(?:\*\*|__)?\s*:\s*([0-9]+(?:\.[0-9]+)?)',
-    caseSensitive: false,
-  ).firstMatch(text) ?? RegExp(
-    r'Calories\s*:\s*([0-9]+(?:\.[0-9]+)?).*?'
-    r'Protein\s*:\s*([0-9]+(?:\.[0-9]+)?).*?'
-    r'Carbs?\s*:\s*([0-9]+(?:\.[0-9]+)?).*?'
-    r'Fats?\s*:\s*([0-9]+(?:\.[0-9]+)?)',
-    caseSensitive: false,
-    dotAll: true,
-  ).firstMatch(text);
+    final match = RegExp(
+      r'(?:\*\*|__)?Calories(?:\*\*|__)?\s*:\s*([0-9]+(?:\.[0-9]+)?)\D+'
+      r'(?:\*\*|__)?Protein(?:\*\*|__)?\s*:\s*([0-9]+(?:\.[0-9]+)?)\D+'
+      r'(?:\*\*|__)?Carbs?(?:\*\*|__)?\s*:\s*([0-9]+(?:\.[0-9]+)?)\D+'
+      r'(?:\*\*|__)?Fats?(?:\*\*|__)?\s*:\s*([0-9]+(?:\.[0-9]+)?)',
+      caseSensitive: false,
+    ).firstMatch(text) ?? RegExp(
+      r'Calories\s*:\s*([0-9]+(?:\.[0-9]+)?).*?'
+      r'Protein\s*:\s*([0-9]+(?:\.[0-9]+)?).*?'
+      r'Carbs?\s*:\s*([0-9]+(?:\.[0-9]+)?).*?'
+      r'Fats?\s*:\s*([0-9]+(?:\.[0-9]+)?)',
+      caseSensitive: false,
+      dotAll: true,
+    ).firstMatch(text);
 
-  if (match == null) return null;
-  final values = List.generate(
-    4,
-    (index) => double.tryParse(match.group(index + 1) ?? ''),
-  );
-  if (values.any((value) => value == null)) return null;
-  return MacroSummary(
-    calories: values[0]!,
-    protein: values[1]!,
-    carbs: values[2]!,
-    fat: values[3]!,
-  );
-}
+    if (match == null) return null;
+    final values = List.generate(
+      4,
+      (index) => double.tryParse(match.group(index + 1) ?? ''),
+    );
+    if (values.any((value) => value == null)) return null;
+    return MacroSummary(
+      calories: values[0]!,
+      protein: values[1]!,
+      carbs: values[2]!,
+      fat: values[3]!,
+    );
+  }
 
   Future<void> _logMacroSummary(MacroSummary summary) async {
     if (_loggingProgress) return;
@@ -294,16 +313,6 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       }
     });
-  }
-
-  Future<void> _playAudio() async {
-    final audio = _responseAudio;
-    if (audio == null || audio.isEmpty) return;
-    try {
-      await _audioPlayer.play(audio);
-    } catch (_) {
-      _showError('The voice response could not be played on this device.');
-    }
   }
 
   @override
@@ -427,6 +436,23 @@ class _ChatScreenState extends State<ChatScreen> {
                                       : 'Log to Daily Progress'),
                                 ),
                               ],
+                              if (!message.isUser) ...[
+                                const SizedBox(height: 8),
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: TextButton.icon(
+                                    onPressed: () => _playMessageAudio(message.text),
+                                    icon: const Icon(Icons.volume_up, size: 16),
+                                    label: const Text('Listen'),
+                                    style: TextButton.styleFrom(
+                                      foregroundColor: AppTheme.primary,
+                                      padding: EdgeInsets.zero,
+                                      minimumSize: const Size(50, 30),
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),
@@ -446,8 +472,8 @@ class _ChatScreenState extends State<ChatScreen> {
                     onPressed: _sending
                         ? null
                         : () => _send(
-                              'Family Daal Estimator: 1 cup chana, 3 tbsp oil for 5 people. I ate 1.5 ladles.',
-                            ),
+                            'Family Daal Estimator: 1 cup chana, 3 tbsp oil for 5 people. I ate 1.5 ladles.',
+                          ),
                   ),
                   const SizedBox(width: 8),
                   ActionChip(
@@ -455,8 +481,8 @@ class _ChatScreenState extends State<ChatScreen> {
                     onPressed: _sending
                         ? null
                         : () => _send(
-                              'Desi Chicken Karahi Portion: 1kg chicken, 4 tbsp ghee for 4 people. I ate 1 bowl.',
-                            ),
+                            'Desi Chicken Karahi Portion: 1kg chicken, 4 tbsp ghee for 4 people. I ate 1 bowl.',
+                          ),
                   ),
                 ],
               ),
@@ -507,15 +533,6 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
           ),
-          if (_responseAudio != null && _responseAudio!.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: OutlinedButton.icon(
-                icon: const Icon(Icons.volume_up),
-                label: const Text('Play voice response'),
-                onPressed: _playAudio,
-              ),
-            ),
         ],
       ),
     );
