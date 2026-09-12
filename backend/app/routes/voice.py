@@ -225,7 +225,7 @@ async def text_to_speech(
         )
 @router.post("/speak")
 @limiter.limit("10/minute")
-async def get_spoken_text(text: str, lang: str = "en"):
+async def get_spoken_text(request: Request, text: str, lang: str = "en"):
     """
     Returns raw audio bytes directly, preventing playsound server crashes.
     """
