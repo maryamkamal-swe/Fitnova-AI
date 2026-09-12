@@ -30,8 +30,18 @@ OUT_OF_SCOPE_MESSAGE = (
 )
 IN_SCOPE_PATTERN = re.compile(
     r"\b(fitness|workout|exercise|training|gym|muscle|strength|cardio|"
-    r"nutrition|food|meal|diet|calorie|protein|carb|fat|weight|bmi|"
-    r"sleep|hydration|water|recovery|health|wellness|recipe|body)\b",
+    r"nutrition|food|meal|diet|eat|eating|calorie|protein|carb|fat|"
+    r"fiber|fibre|sugar|sodium|cholesterol|vitamin|vitamins|mineral|"
+    r"minerals|ingredient|ingredients|portion|serving|snack|breakfast|"
+    r"lunch|dinner|rice|egg|eggs|chicken|milk|bread|weight|bmi|sleep|"
+    r"hydration|water|recovery|health|wellness|recipe|body|"
+    r"family|families|household|batch|pot|cooking|cooked|ladle|bowl|"
+    r"estimate|estimator|macro|macros|kcal|portioning|servings|"
+    r"sehat|sehatmand|khana|khurak|nashta|dophar|dopahar|raat|"
+    r"pani|wazan|vazan|charbi|motapa|kam|zyada|faida|faide|"
+    r"kitna|kitni|kitne|ghar|walay|wale|wali|log|bachay|bache|"
+    r"anda|anday|gosht|murghi|chawal|doodh|daal|dal|aloo|roti|"
+    r"chai|cheeni|namak|tel|ghee|bhook|hazma|qabz)\b",
     re.IGNORECASE,
 )
 SAFETY_RESPONSE = "I can only assist with fitness, nutrition, and wellness topics."
