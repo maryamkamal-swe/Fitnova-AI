@@ -50,7 +50,8 @@ async def chat_endpoint(
     payload: ChatRequest,
     user_id: str = Depends(get_current_user_id),
 ):
-    user_profile = await get_user_profile(user_id) or DEFAULT_RAG_PROFILE
+    # Map the test payload first, fallback to DB fetch
+    user_profile = payload.user_profile or await get_user_profile(user_id) or DEFAULT_RAG_PROFILE
 
     try:
         result = await rag_service.agenerate_response(
@@ -79,7 +80,7 @@ async def chat_stream_endpoint(
     payload: ChatRequest,
     user_id: str = Depends(get_current_user_id),
 ):
-    user_profile = await get_user_profile(user_id) or DEFAULT_RAG_PROFILE
+    user_profile = payload.user_profile or await get_user_profile(user_id) or DEFAULT_RAG_PROFILE
 
     return StreamingResponse(
         rag_service.astream_response(

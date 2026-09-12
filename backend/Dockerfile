@@ -16,7 +16,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --upgrade pip \
+
+# The --mount flag saves downloaded packages to a persistent cache layer
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip \
     && pip install -r requirements.txt
 
 COPY . .

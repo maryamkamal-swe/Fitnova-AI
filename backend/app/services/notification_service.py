@@ -168,10 +168,7 @@ class NotificationService:
         return self._format_notification_response(updated)
 
     async def send_push_notification(self, user_id: str, notification: NotificationResponse) -> bool:
-        """Send a push notification when Firebase is configured.
-
-        If Firebase is not configured, the notification is still stored for in-app delivery.
-        """
+        """Send a push notification when Firebase is configured."""
         if notification.channel != NotificationChannel.PUSH:
             return True
 
@@ -179,10 +176,7 @@ class NotificationService:
             import firebase_admin
             from firebase_admin import messaging
         except ImportError:
-            logger.warning(
-                "Firebase admin SDK is not installed. Notification stored only. "
-                "Install firebase-admin to enable push delivery."
-            )
+            logger.warning("Firebase admin SDK is not installed. Notification stored only.")
             return False
 
         if not firebase_admin._apps:
@@ -190,15 +184,25 @@ class NotificationService:
             return False
 
         try:
+            # Look up the user's target device token
+            user_object_id = self.parse_notification_id(user_id)
+            user_doc = await self._get_collection().database.users.find_one({"_id": user_object_id})
+            fcm_token = user_doc.get("fcm_token") if user_doc else None
+            
+            if not fcm_token:
+                logger.warning(f"Push delivery failed: User {user_id} lacks an fcm_token.")
+                return False
+
             message = messaging.Message(
-                notification={
-                    "title": notification.title,
-                    "body": notification.message,
-                },
+                notification=messaging.Notification(
+                    title=notification.title,
+                    body=notification.message,
+                ),
                 data={
                     "type": notification.type.value,
                     "notification_id": notification.id,
                 },
+                token=fcm_token
             )
             messaging.send(message)
             return True

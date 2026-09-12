@@ -115,8 +115,11 @@ async def generate_workout_plan(
         raw_plan = _fallback_plan(candidates, day_labels)
 
     validated_plan = _validate_plan(raw_plan, candidate_ids)
-    if not any(day.exercises for day in validated_plan.days):
-        logger.warning("Structured workout plan contained no valid exercises; using fallback.")
+    
+    # Ensure ALL scheduled days have at least one valid exercise.
+    # If any single day is wiped out due to hallucinations, abandon the corrupted plan entirely.
+    if not all(day.exercises for day in validated_plan.days):
+        logger.warning("Structured workout plan contained empty days after validation; using fallback.")
         validated_plan = _fallback_plan(candidates, day_labels)
 
     response = WorkoutPlanResponse(

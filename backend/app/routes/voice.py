@@ -5,7 +5,8 @@ import io
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+# ADD Response here
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Response 
 from gtts import gTTS
 from pydantic import BaseModel, Field
 import speech_recognition as sr
@@ -14,6 +15,8 @@ from ..core.limiter import limiter
 from ..services.rag_service import SAFETY_RESPONSE, validate_user_prompt
 from ..utils.security import get_current_user
 from ..voice import translator
+# ADD this line here
+from ..voice.tts import generate_audio
 
 logger = logging.getLogger(__name__)
 
@@ -220,7 +223,16 @@ async def text_to_speech(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while processing your request.",
         )
-
+@router.post("/speak")
+@limiter.limit("10/minute")
+async def get_spoken_text(text: str, lang: str = "en"):
+    """
+    Returns raw audio bytes directly, preventing playsound server crashes.
+    """
+    # Using asyncio.to_thread prevents pyttsx3 from freezing the server
+    audio_bytes = await asyncio.to_thread(generate_audio, text, lang)
+    
+    return Response(content=audio_bytes, media_type="audio/mpeg")
 
 @router.get("/health")
 async def voice_health_check():
