@@ -215,26 +215,34 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   MacroSummary? _macroSummary(String text) {
-    final match = RegExp(
-      r'Calories\s*:\s*([0-9]+(?:\.[0-9]+)?)\D+'
-      r'Protein\s*:\s*([0-9]+(?:\.[0-9]+)?)\D+'
-      r'Carbs?\s*:\s*([0-9]+(?:\.[0-9]+)?)\D+'
-      r'Fats?\s*:\s*([0-9]+(?:\.[0-9]+)?)',
-      caseSensitive: false,
-    ).firstMatch(text);
-    if (match == null) return null;
-    final values = List.generate(
-      4,
-      (index) => double.tryParse(match.group(index + 1) ?? ''),
-    );
-    if (values.any((value) => value == null)) return null;
-    return MacroSummary(
-      calories: values[0]!,
-      protein: values[1]!,
-      carbs: values[2]!,
-      fat: values[3]!,
-    );
-  }
+  final match = RegExp(
+    r'(?:\*\*|__)?Calories(?:\*\*|__)?\s*:\s*([0-9]+(?:\.[0-9]+)?)\D+'
+    r'(?:\*\*|__)?Protein(?:\*\*|__)?\s*:\s*([0-9]+(?:\.[0-9]+)?)\D+'
+    r'(?:\*\*|__)?Carbs?(?:\*\*|__)?\s*:\s*([0-9]+(?:\.[0-9]+)?)\D+'
+    r'(?:\*\*|__)?Fats?(?:\*\*|__)?\s*:\s*([0-9]+(?:\.[0-9]+)?)',
+    caseSensitive: false,
+  ).firstMatch(text) ?? RegExp(
+    r'Calories\s*:\s*([0-9]+(?:\.[0-9]+)?).*?'
+    r'Protein\s*:\s*([0-9]+(?:\.[0-9]+)?).*?'
+    r'Carbs?\s*:\s*([0-9]+(?:\.[0-9]+)?).*?'
+    r'Fats?\s*:\s*([0-9]+(?:\.[0-9]+)?)',
+    caseSensitive: false,
+    dotAll: true,
+  ).firstMatch(text);
+
+  if (match == null) return null;
+  final values = List.generate(
+    4,
+    (index) => double.tryParse(match.group(index + 1) ?? ''),
+  );
+  if (values.any((value) => value == null)) return null;
+  return MacroSummary(
+    calories: values[0]!,
+    protein: values[1]!,
+    carbs: values[2]!,
+    fat: values[3]!,
+  );
+}
 
   Future<void> _logMacroSummary(MacroSummary summary) async {
     if (_loggingProgress) return;

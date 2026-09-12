@@ -155,9 +155,18 @@ class ApiClient {
           statusCode: response.statusCode,
         );
       }
-      yield* response.stream.transform(utf8.decoder).transform(
-            const LineSplitter(),
-          );
+      await for (final line in response.stream
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())) {
+        if (line.startsWith('data:')) {
+          final data = line.substring(5).trim();
+          if (data.isNotEmpty) {
+            yield data;
+          }
+        } else if (line.isNotEmpty && !line.startsWith(':')) {
+          yield line;
+        }
+      }
     } on ApiException {
       rethrow;
     } on TimeoutException {

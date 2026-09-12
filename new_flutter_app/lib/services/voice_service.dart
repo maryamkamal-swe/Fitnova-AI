@@ -1,3 +1,4 @@
+// lib/services/voice_service.dart
 import '../core/constants.dart';
 import 'api_client.dart';
 
@@ -72,10 +73,14 @@ class VoiceService {
     required String audioData,
     String languageCode = 'en-US',
   }) async {
+    final body = {
+      'audio_data': audioData,
+      'language_code': languageCode,
+    };
     final response = await _apiClient.post(
       AppConstants.voiceTranscribeEndpoint,
       requiresAuth: true,
-      body: {'audio_data': audioData, 'language_code': languageCode},
+      body: body,
     );
     if (response is! Map<String, dynamic>) {
       throw const ApiException(message: 'Invalid transcription response.');

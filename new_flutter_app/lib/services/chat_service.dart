@@ -1,7 +1,9 @@
+// lib/services/chat_service.dart
+import 'dart:async';
+import 'dart:convert';
 import '../core/constants.dart';
 import '../models/chat_message.dart';
 import 'api_client.dart';
-import 'dart:convert';
 
 class ChatService {
   final ApiClient _apiClient;
@@ -31,13 +33,17 @@ class ChatService {
     required String query,
     required String sessionId,
   }) async* {
-    await for (final line in _apiClient.postSse(
+    final body = {
+      'query': query.trim(),
+      'session_id': sessionId,
+    };
+
+    await for (final payload in _apiClient.postSse(
       '${AppConstants.aiChatEndpoint}/stream',
-      body: {'query': query.trim(), 'session_id': sessionId},
+      body: body,
     )) {
-      if (!line.startsWith('data:')) continue;
-      final payload = line.substring(5).trim();
-      if (payload.isEmpty || payload == '[DONE]') return;
+      if (payload.isEmpty || payload == '[DONE]') continue;
+
       String? text;
       try {
         final decoded = jsonDecode(payload);
@@ -57,7 +63,10 @@ class ChatService {
       } catch (_) {
         text = payload;
       }
-      if (text != null && text.isNotEmpty) yield text;
+
+      if (text != null && text.isNotEmpty) {
+        yield text;
+      }
     }
   }
 }
