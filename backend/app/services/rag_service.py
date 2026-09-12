@@ -90,6 +90,14 @@ ROMAN_URDU_REPLACEMENTS = {
     r"\baloo\b": "potato",
     r"\broti\b": "bread",
 }
+ROMAN_URDU_HINT_PATTERN = re.compile(
+    r"\b(mujhe|mujhy|mera|meri|mere|aap|ap|kya|kyun|kaise|kaisa|"
+    r"ke|ki|ka|mein|main|hai|hain|ho|karna|karo|batao|batayein|"
+    r"sehat|khana|khurak|nashta|pani|wazan|vazan|charbi|motapa|"
+    r"faida|faide|kitna|kitni|kitne|ghar|walay|wale|wali|"
+    r"anda|anday|gosht|murghi|chawal|doodh|daal|dal|aloo|roti)\b",
+    re.IGNORECASE,
+)
 STOP_WORDS = {
     "100", "50", "200", "500", "gram", "grams", "g", "kg", "ml", "cup",
     "cups", "oz", "lb", "mein", "me", "hota", "hoti", "hotai", "hai",
@@ -105,6 +113,34 @@ def normalize_roman_urdu(query: str) -> str:
     for pattern, replacement in ROMAN_URDU_REPLACEMENTS.items():
         normalized = re.sub(pattern, replacement, normalized)
     return normalized
+
+
+def _detect_query_language(query: str, language_code: Optional[str] = None) -> str:
+    requested = (language_code or "").split("-")[0].split("_")[0].lower()
+    if requested:
+        return requested
+    if re.search(r"[\u0600-\u06ff]", query):
+        return "ur"
+    if re.search(r"[\u0900-\u097f]", query):
+        return "hi"
+    if ROMAN_URDU_HINT_PATTERN.search(query):
+        return "ur"
+    return "en"
+
+
+def translate_query_to_english(
+    query: str, language_code: Optional[str] = None
+) -> str:
+    """Normalize Roman Urdu and translate script-based/non-English input for RAG."""
+    source_language = _detect_query_language(query, language_code)
+    if source_language == "en" or not query.strip():
+        return normalize_roman_urdu(query)
+
+    from app.voice.translator import translate_to_english
+
+    return normalize_roman_urdu(
+        translate_to_english(query, source_language)
+    )
 
 
 def _food_query_from_text(query: str) -> str:
@@ -303,6 +339,7 @@ class RAGService:
                 yield chunk
 
     def is_query_off_topic(self, query: str) -> bool:
+        query = normalize_roman_urdu(query)
         return bool(
             OUT_OF_SCOPE_PATTERN.search(query)
             or not IN_SCOPE_PATTERN.search(query)
@@ -328,13 +365,13 @@ class RAGService:
         session_id: str,
         user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        if not validate_user_prompt(user_query):
+        cleaned_query = normalize_roman_urdu(user_query)
+        if not validate_user_prompt(cleaned_query):
             return {"answer": SAFETY_RESPONSE, "sources": []}
-        if self.is_query_off_topic(user_query):
+        if self.is_query_off_topic(cleaned_query):
             return {"answer": OUT_OF_SCOPE_MESSAGE, "sources": []}
 
         owner_id = user_id or "anonymous"
-        cleaned_query = normalize_roman_urdu(user_query)
         history = await self._history(owner_id, session_id)
         tool_sources: List[Dict[str, Any]] = []
         tool_context = ""
@@ -425,12 +462,14 @@ class RAGService:
         user_id: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         """Stream genuine token chunks via Server-Sent Events (SSE)."""
-        if not validate_user_prompt(user_query) or self.is_query_off_topic(user_query):
+        cleaned_query = normalize_roman_urdu(user_query)
+        if not validate_user_prompt(cleaned_query) or self.is_query_off_topic(
+            cleaned_query
+        ):
             yield f"data: {json.dumps({'content': OUT_OF_SCOPE_MESSAGE})}\n\n"
             return
 
         owner_id = user_id or "anonymous"
-        cleaned_query = normalize_roman_urdu(user_query)
         history = await self._history(owner_id, session_id)
         tool_context = ""
 

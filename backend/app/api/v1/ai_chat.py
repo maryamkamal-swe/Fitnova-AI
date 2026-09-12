@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from datetime import date as date_type
 from typing import Any, Dict, List, Optional
 
@@ -8,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.database import DEFAULT_RAG_PROFILE, get_user_profile
-from app.services.rag_service import rag_service
+from app.services.rag_service import rag_service, translate_query_to_english
 from app.core.limiter import limiter
 from app.utils.security import get_current_user_id
 from app.services.progress_service import ProgressService
@@ -29,6 +30,10 @@ class ChatRequest(BaseModel):
         min_length=1,
         description="Unique chat session identifier",
         json_schema_extra={"example": "session_123"},
+    )
+    language_code: Optional[str] = Field(
+        default=None,
+        description="Optional input language code, such as ur or hi",
     )
     user_profile: Optional[Dict[str, Any]] = Field(
         default=None,
@@ -67,8 +72,11 @@ async def chat_endpoint(
             or await get_user_profile(user_id)
             or DEFAULT_RAG_PROFILE
         )
+        english_query = await asyncio.to_thread(
+            translate_query_to_english, payload.query, payload.language_code
+        )
         result = await rag_service.agenerate_response(
-            user_query=payload.query,
+            user_query=english_query,
             user_profile=user_profile,
             session_id=payload.session_id,
             user_id=user_id,
@@ -109,9 +117,12 @@ async def chat_stream_endpoint(
         )
     user_profile = payload.user_profile or await get_user_profile(user_id) or DEFAULT_RAG_PROFILE
 
+    english_query = await asyncio.to_thread(
+        translate_query_to_english, payload.query, payload.language_code
+    )
     return StreamingResponse(
         rag_service.astream_response(
-            user_query=payload.query,
+            user_query=english_query,
             user_profile=user_profile,
             session_id=payload.session_id,
             user_id=user_id,

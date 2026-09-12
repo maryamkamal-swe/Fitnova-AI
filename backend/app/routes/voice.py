@@ -12,7 +12,11 @@ from pydantic import BaseModel, Field
 import speech_recognition as sr
 
 from ..core.limiter import limiter
-from ..services.rag_service import SAFETY_RESPONSE, validate_user_prompt
+from ..services.rag_service import (
+    SAFETY_RESPONSE,
+    translate_query_to_english,
+    validate_user_prompt,
+)
 from ..utils.security import get_current_user
 from ..voice import translator
 # ADD this line here
@@ -180,17 +184,16 @@ async def voice_chat(
     try:
         language_code = (payload.language_code or "en").split("-")[0].split("_")[0].lower()
         logger.info(f"Voice chat from user {current_user['id']} in language {language_code}")
-        if not validate_user_prompt(payload.text):
+        english_text = await asyncio.to_thread(
+            translate_query_to_english,
+            payload.text,
+            language_code,
+        )
+        if not validate_user_prompt(english_text):
             return VoiceChatResponse(
                 response_text=SAFETY_RESPONSE,
                 response_audio=None,
                 language_code=language_code,
-            )
-        
-        english_text = payload.text
-        if payload.translate_to_english and language_code != "en":
-            english_text = await asyncio.to_thread(
-                translator.translate_to_english, payload.text, language_code
             )
         
         from ..database import get_user_profile
