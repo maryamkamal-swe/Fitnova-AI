@@ -70,7 +70,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       final email = _emailController.text.trim();
       final password = _passwordController.text;
 
-      final authResponse = await _authService.register(
+      final registration = await _authService.register(
         email: email,
         password: password,
       );
@@ -78,42 +78,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
       if (!mounted) return;
 
       final pendingProfile = UserProfile(name: name);
-      final otpResult = await _authService.sendOtp(email: email);
-      if (!mounted) return;
-
-      if (authResponse != null && authResponse.accessToken.isNotEmpty) {
-        if (otpResult.autoVerified) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(otpResult.message)),
-          );
-          Navigator.of(context).pushReplacementNamed(
-            AppConstants.profileSetupRoute,
-            arguments: pendingProfile,
-          );
-          return;
-        }
-        Navigator.of(context).pushReplacementNamed(
-          AppConstants.emailVerificationRoute,
-          arguments: {
-            'email': email,
-            'profile': pendingProfile,
-            'developmentCode': otpResult.developmentCode,
-          },
-        );
-        return;
-      }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Sorry, one more step: please set up your profile so we can personalize your plan.',
-          ),
-          backgroundColor: AppTheme.surface,
-          duration: Duration(seconds: 4),
-        ),
+        SnackBar(content: Text(registration.message)),
       );
       Navigator.of(context).pushReplacementNamed(
-        AppConstants.profileSetupRoute,
-        arguments: UserProfile(name: name),
+        AppConstants.emailVerificationRoute,
+        arguments: {
+          'email': registration.email.isEmpty ? email : registration.email,
+          'profile': pendingProfile,
+          'developmentCode': registration.developmentCode,
+        },
       );
     } on ApiException catch (e) {
       if (!mounted) return;

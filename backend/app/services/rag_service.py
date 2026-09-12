@@ -28,6 +28,12 @@ OUT_OF_SCOPE_PATTERN = re.compile(
 OUT_OF_SCOPE_MESSAGE = (
     "I can only assist with fitness, nutrition, and wellness topics."
 )
+IN_SCOPE_PATTERN = re.compile(
+    r"\b(fitness|workout|exercise|training|gym|muscle|strength|cardio|"
+    r"nutrition|food|meal|diet|calorie|protein|carb|fat|weight|bmi|"
+    r"sleep|hydration|water|recovery|health|wellness|recipe|body)\b",
+    re.IGNORECASE,
+)
 SAFETY_RESPONSE = "I can only assist with fitness, nutrition, and wellness topics."
 PROMPT_INJECTION_PATTERN = re.compile(
     r"(ignore\s+(?:all\s+|any\s+|the\s+)?previous\s+instructions?|"
@@ -184,6 +190,15 @@ class RAGService:
             groq_api_key=settings.GROQ_API_KEY,
             temperature=0.1,
         )
+        self.fallback_llm = (
+            ChatGroq(
+                model=settings.GROQ_FALLBACK_MODEL,
+                groq_api_key=settings.GROQ_FALLBACK_API_KEY,
+                temperature=0.1,
+            )
+            if settings.GROQ_FALLBACK_API_KEY and settings.GROQ_FALLBACK_MODEL
+            else None
+        )
         self.vector_store = get_vector_store(
             collection_name=self.collection_name,
             persist_directory=self.persist_directory,
@@ -192,9 +207,12 @@ class RAGService:
             search_type="similarity_score_threshold",
             search_kwargs={"k": 4, "score_threshold": 0.2},
         )
-        self.rag_chain = self._build_chain()
+        self.rag_chain = self._build_chain(self.llm)
+        self.fallback_chain = (
+            self._build_chain(self.fallback_llm) if self.fallback_llm else None
+        )
 
-    def _build_chain(self):
+    def _build_chain(self, llm):
         contextualize_prompt = ChatPromptTemplate.from_messages(
             [
                 (
@@ -207,7 +225,7 @@ class RAGService:
             ]
         )
         history_aware_retriever = create_history_aware_retriever(
-            self.llm, self.retriever, contextualize_prompt
+            llm, self.retriever, contextualize_prompt
         )
         system_prompt = (
             "You are FitNova AI, an expert fitness and nutrition coach.\n"
@@ -245,11 +263,40 @@ class RAGService:
         )
         return create_retrieval_chain(
             history_aware_retriever,
-            create_stuff_documents_chain(self.llm, qa_prompt),
+            create_stuff_documents_chain(llm, qa_prompt),
         )
 
+    async def _invoke_chain_with_fallback(self, chain_input: dict):
+        try:
+            return await self.rag_chain.ainvoke(chain_input)
+        except Exception as primary_error:
+            if self.fallback_chain is None:
+                raise
+            logger.exception(
+                "Primary RAG provider failed; attempting configured fallback: %s",
+                primary_error,
+            )
+            return await self.fallback_chain.ainvoke(chain_input)
+
+    async def _stream_chain_with_fallback(self, chain_input: dict):
+        try:
+            async for chunk in self.rag_chain.astream(chain_input):
+                yield chunk
+        except Exception as primary_error:
+            if self.fallback_chain is None:
+                raise
+            logger.exception(
+                "Primary streaming RAG provider failed; attempting configured fallback: %s",
+                primary_error,
+            )
+            async for chunk in self.fallback_chain.astream(chain_input):
+                yield chunk
+
     def is_query_off_topic(self, query: str) -> bool:
-        return bool(OUT_OF_SCOPE_PATTERN.search(query))
+        return bool(
+            OUT_OF_SCOPE_PATTERN.search(query)
+            or not IN_SCOPE_PATTERN.search(query)
+        )
 
     async def _history(
         self, user_id: str, session_id: str
@@ -298,7 +345,7 @@ class RAGService:
         profile_string = self._format_profile(user_profile)
 
         try:
-            result = await self.rag_chain.ainvoke(
+            result = await self._invoke_chain_with_fallback(
                 {
                     "input": cleaned_query,
                     "user_profile": f"{profile_string}\nNutrition tool result: {tool_context}",
@@ -391,7 +438,7 @@ class RAGService:
         full_answer_accumulator = []
 
         try:
-            async for chunk in self.rag_chain.astream(
+            async for chunk in self._stream_chain_with_fallback(
                 {
                     "input": cleaned_query,
                     "user_profile": f"{profile_string}\nNutrition tool result: {tool_context}",

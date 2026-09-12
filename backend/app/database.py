@@ -7,7 +7,7 @@ from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from bson import ObjectId
 from bson.errors import InvalidId
 from pymongo import ASCENDING, DESCENDING, UpdateOne
-from pymongo.errors import ConnectionFailure
+from pymongo.errors import ConnectionFailure, OperationFailure
 from .config import settings
 import logging
 from typing import Any, Dict, List, Optional
@@ -60,9 +60,32 @@ async def initialize_indexes() -> None:
     await db.db.users.create_index(
         [("email", ASCENDING)], name="users_email_unique", unique=True
     )
+    # Older deployments created this index without ``unique``.  Replace it
+    # explicitly so concurrent daily writes cannot create duplicate records.
+    try:
+        await db.db.progress.drop_index("progress_user_date")
+    except OperationFailure:
+        pass
+    duplicate_groups = db.db.progress.aggregate(
+        [
+            {
+                "$group": {
+                    "_id": {"user_id": "$user_id", "date": "$date"},
+                    "ids": {"$push": "$_id"},
+                    "count": {"$sum": 1},
+                }
+            },
+            {"$match": {"count": {"$gt": 1}}},
+        ]
+    )
+    async for group in duplicate_groups:
+        # Keep the first record; atomic upserts prevent new duplicates once
+        # the unique index is recreated.
+        await db.db.progress.delete_many({"_id": {"$in": group["ids"][1:]}})
     await db.db.progress.create_index(
         [("user_id", ASCENDING), ("date", DESCENDING)],
         name="progress_user_date",
+        unique=True,
     )
     await db.db.food_logs.create_index(
         [("user_id", ASCENDING), ("date", DESCENDING)],
@@ -88,6 +111,11 @@ async def initialize_indexes() -> None:
     await db.db.refresh_tokens.create_index(
         [("expires_at", ASCENDING)],
         name="refresh_tokens_expiry_ttl",
+        expireAfterSeconds=0,
+    )
+    await db.db.otps.create_index(
+        [("expires_at", ASCENDING)],
+        name="otps_expiry_ttl",
         expireAfterSeconds=0,
     )
 

@@ -129,6 +129,14 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class RegistrationResponse(BaseModel):
+    """Registration result before email verification."""
+    email: EmailStr
+    message: str
+    delivered: bool
+    development_code: Optional[str] = None
+
+
 class TokenRefresh(BaseModel):
     """Schema for token refresh"""
     refresh_token: str

@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import Optional, List
 from datetime import date, timedelta, datetime
 from pydantic import BaseModel, Field, model_validator
+from pymongo import ReturnDocument
 from ..database import get_database
 from ..models.progress import ProgressCreate, ProgressResponse, ProgressStats, ProgressUpdate
 from ..services.progress_service import ProgressService
@@ -31,6 +32,11 @@ class HydrationLogRequest(BaseModel):
         if self.added_amount is None:
             self.added_amount = self.liters
         return self
+
+
+class CalorieIncrementRequest(BaseModel):
+    calories: int = Field(..., gt=0, le=100_000)
+    date: date_type = Field(default_factory=date.today)
 
 
 @router.post("", response_model=ProgressResponse, status_code=status.HTTP_201_CREATED)
@@ -155,6 +161,17 @@ async def get_today_hydration(
     return {"liters": entry.get("water_intake", 0), "date": str(date_value)}
 
 
+@router.post("/calories-burned", response_model=ProgressResponse)
+async def log_burned_calories(
+    calorie_data: CalorieIncrementRequest,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Atomically add calories burned by a completed workout."""
+    return await progress_service.increment_progress(
+        user_id, calorie_data.date, calories_burned=calorie_data.calories
+    )
+
+
 @router.get("/{progress_id}", response_model=ProgressResponse)
 async def get_progress_by_id(
     progress_id: str,
@@ -222,7 +239,7 @@ async def log_hydration(
     collection = get_database().progress
     entry_datetime = datetime.combine(hydration_data.date, datetime.min.time())
 
-    result = await collection.update_one(
+    entry = await collection.find_one_and_update(
         {"user_id": user_id, "date": entry_datetime},
         {
             "$inc": {"water_intake": hydration_data.added_amount},
@@ -230,13 +247,15 @@ async def log_hydration(
             "$setOnInsert": {"created_at": datetime.utcnow(), "workout_completed": False},
         },
         upsert=True,
+        return_document=ReturnDocument.AFTER,
     )
-    entry = await collection.find_one({"user_id": user_id, "date": entry_datetime})
     return {
         "message": "Hydration logged successfully",
         "liters": entry.get("water_intake", 0) if entry else 0,
         "date": str(hydration_data.date),
     }
+
+
 
 
 @router.get("/chart/weight")

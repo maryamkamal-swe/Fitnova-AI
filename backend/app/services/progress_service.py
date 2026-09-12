@@ -8,6 +8,7 @@ from typing import Optional, List
 from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import HTTPException, status
+from pymongo import ReturnDocument
 from ..database import get_database
 from ..models.progress import ProgressCreate, ProgressResponse, ProgressStats, ProgressUpdate
 
@@ -57,37 +58,63 @@ class ProgressService:
 
     async def create_progress(self, user_id: str, progress_data: ProgressCreate) -> ProgressResponse:
         """
-        Create or update progress entry for a specific date.
+        Create or update the single progress entry for a specific date atomically.
         """
         collection = self._get_collection()
+        target_date = self._mongo_datetime(progress_data.date)
+        update_data = progress_data.model_dump(exclude={"date"}, exclude_unset=True)
+        update_data["updated_at"] = datetime.utcnow()
+        progress = await collection.find_one_and_update(
+            {"user_id": user_id, "date": target_date},
+            {
+                "$set": update_data,
+                "$setOnInsert": {
+                    "user_id": user_id,
+                    "date": target_date,
+                    "created_at": datetime.utcnow(),
+                },
+            },
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+        if progress_data.weight is not None:
+            await self._sync_profile_weight(user_id, progress_data.weight)
+        return self._format_progress_response(progress)
 
-        existing = await collection.find_one({
-            "user_id": user_id,
-            "date": self._mongo_datetime(progress_data.date)
-        })
+    async def increment_progress(
+        self,
+        user_id: str,
+        target_date: date,
+        *,
+        calories_consumed: int = 0,
+        calories_burned: int = 0,
+    ) -> ProgressResponse:
+        """Atomically add calorie deltas to a user's daily record."""
+        increments = {}
+        if calories_consumed:
+            increments["calories_consumed"] = calories_consumed
+        if calories_burned:
+            increments["calories_burned"] = calories_burned
+        if not increments:
+            return await self.get_progress_by_date(user_id, target_date)
 
-        if existing:
-            update_data = progress_data.model_dump(exclude_unset=True)
-            if "date" in update_data:
-                update_data["date"] = self._mongo_datetime(update_data["date"])
-            await collection.update_one(
-                {"_id": existing["_id"]},
-                {"$set": update_data}
-            )
-
-            updated = await collection.find_one({"_id": existing["_id"]})
-            return self._format_progress_response(updated)
-
-        progress_doc = {
-            "user_id": user_id,
-            **progress_data.model_dump(),
-            "created_at": datetime.utcnow()
-        }
-        progress_doc["date"] = self._mongo_datetime(progress_doc["date"])
-
-        result = await collection.insert_one(progress_doc)
-        created = await collection.find_one({"_id": result.inserted_id})
-        return self._format_progress_response(created)
+        target_datetime = self._mongo_datetime(target_date)
+        progress = await self._get_collection().find_one_and_update(
+            {"user_id": user_id, "date": target_datetime},
+            {
+                "$inc": increments,
+                "$set": {"updated_at": datetime.utcnow()},
+                "$setOnInsert": {
+                    "user_id": user_id,
+                    "date": target_datetime,
+                    "workout_completed": False,
+                    "created_at": datetime.utcnow(),
+                },
+            },
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+        return self._format_progress_response(progress)
 
     async def get_progress_history(
         self,
@@ -163,22 +190,36 @@ class ProgressService:
             )
 
         progress_object_id = ObjectId(progress_id)
-        result = await collection.update_one(
+        updated = await collection.find_one_and_update(
             {
                 "_id": progress_object_id,
                 "user_id": user_id
             },
-            {"$set": update_data}
+            {"$set": {**update_data, "updated_at": datetime.utcnow()}},
+            return_document=ReturnDocument.AFTER,
         )
 
-        if result.matched_count == 0:
+        if not updated:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Progress entry not found"
             )
 
-        updated = await collection.find_one({"_id": progress_object_id})
+        if progress_data.weight is not None:
+            await self._sync_profile_weight(user_id, progress_data.weight)
         return self._format_progress_response(updated)
+
+    async def _sync_profile_weight(self, user_id: str, weight: float) -> None:
+        """Keep the profile's current weight authoritative after a daily log."""
+        if not ObjectId.is_valid(user_id):
+            return
+        users = getattr(self.db, "users", None)
+        if users is None:
+            return
+        await users.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$set": {"profile.weight": weight, "updated_at": datetime.utcnow()}},
+        )
 
     async def delete_progress(self, progress_id: str, user_id: str) -> bool:
         """Delete a progress entry."""

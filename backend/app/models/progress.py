@@ -97,13 +97,13 @@ class ProgressStats(BaseModel):
 
 class ProgressUpdate(BaseModel):
     """Schema for updating progress entry."""
-    weight: Optional[float] = None
+    weight: Optional[float] = Field(None, gt=0, description="Weight in kg")
     workout_completed: Optional[bool] = None
-    calories_consumed: Optional[int] = None
-    calories_burned: Optional[int] = None
-    water_intake: Optional[float] = None
-    sleep_hours: Optional[float] = None
-    steps: Optional[int] = None
-    active_minutes: Optional[int] = None
-    goal_completion: Optional[float] = None
-    notes: Optional[str] = None
+    calories_consumed: Optional[int] = Field(None, ge=0)
+    calories_burned: Optional[int] = Field(None, ge=0)
+    water_intake: Optional[float] = Field(None, ge=0)
+    sleep_hours: Optional[float] = Field(None, ge=0, le=24)
+    steps: Optional[int] = Field(None, ge=0)
+    active_minutes: Optional[int] = Field(None, ge=0)
+    goal_completion: Optional[float] = Field(None, ge=0, le=100)
+    notes: Optional[str] = Field(None, max_length=500)

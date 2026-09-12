@@ -27,21 +27,52 @@ class MealPlanService {
     );
     return _parse(response);
   }
-  Future<void> logFoodEntry(
+
+  Future<List<Map<String, dynamic>>> getFoodLogs({required String date}) async {
+    final response = await _apiClient.get(
+      '/api/v1/meal-plans/food-log',
+      requiresAuth: true,
+      queryParameters: {'date': date},
+    );
+    if (response is! Map<String, dynamic>) {
+      throw const ApiException(message: 'Invalid food log response.');
+    }
+    final values = response['foods'];
+    return values is List
+        ? values.whereType<Map<String, dynamic>>().toList()
+        : <Map<String, dynamic>>[];
+  }
+  Future<Map<String, dynamic>> logFoodEntry(
     String foodName,
-    int calories, {
+    int? calories, {
     String meal = 'snack',
+    String? foodId,
+    double servingGrams = 100,
+    double servings = 1,
+    String? date,
   }) async {
-    await _apiClient.post(
+    final response = await _apiClient.post(
       '/api/v1/meal-plans/food-log',
       requiresAuth: true,
       body: {
         'food_name': foodName,
-        'calories': calories,
+        if (calories != null) 'calories': calories,
         'meal_type': meal,
+        if (foodId != null && foodId.isNotEmpty) 'food_id': foodId,
+        'serving_grams': servingGrams,
+        'servings': servings,
+        'date': date ?? _dateOnly(DateTime.now()),
       },
     );
+    if (response is! Map<String, dynamic>) {
+      throw const ApiException(message: 'Invalid food log response.');
+    }
+
+    return response;
   }
+
+  String _dateOnly(DateTime value) =>
+      '${value.year.toString().padLeft(4, '0')}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
 
   Future<void> logRecipePreparation(
     String recipeId,

@@ -8,6 +8,7 @@ import '../models/user_profile.dart';
 import '../models/workout_plan.dart';
 import '../services/notification_service.dart';
 import '../services/progress_service.dart';
+import '../services/profile_service.dart';
 
 class ActiveWorkoutScreen extends StatefulWidget {
   final WorkoutDay workout;
@@ -31,6 +32,7 @@ class _ActiveWorkoutScreenState extends State<ActiveWorkoutScreen> {
   int _seconds = 0;
   final Set<int> _completed = {};
   late final ProgressService _progressService;
+  bool _saving = false;
 
   @override
   void initState() {
@@ -47,24 +49,42 @@ class _ActiveWorkoutScreenState extends State<ActiveWorkoutScreen> {
   }
 
   Future<void> _finish() async {
+    if (_saving) return;
+    setState(() => _saving = true);
     _timer?.cancel();
     final elapsedMinutes =
         (_seconds == 0 ? 30 : (_seconds / 60).ceil()).clamp(1, 30 * 24);
-    final weight = widget.userProfile?.weight;
+    UserProfile? latestProfile;
+    try {
+      latestProfile = await ProfileService().getProfile();
+    } catch (_) {
+      latestProfile = widget.userProfile;
+    }
+    final weight = latestProfile?.weight;
+    if (weight == null || weight <= 0 || weight > 300) {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('A valid current profile weight is required.')),
+        );
+      }
+      return;
+    }
     final caloriesBurned = (elapsedMinutes *
-            (weight != null && weight > 0 ? 0.071 * weight : 6.0))
+            (0.071 * weight))
         .round();
 
     try {
+      await _progressService.logCaloriesBurned(
+        caloriesBurned,
+        date: _dateOnly(DateTime.now()),
+      );
       await _progressService.logProgress(
-        ProgressEntry(
-          date: DateTime.now(),
-          workoutCompleted: true,
-          caloriesBurned: caloriesBurned.toDouble(),
-        ),
+        ProgressEntry(date: DateTime.now(), workoutCompleted: true),
       );
     } catch (error) {
       if (mounted) {
+        setState(() => _saving = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Could not save workout: $error')),
         );
@@ -141,4 +161,7 @@ class _ActiveWorkoutScreenState extends State<ActiveWorkoutScreen> {
           ],
         ),
       );
+
+  String _dateOnly(DateTime value) =>
+      '${value.year.toString().padLeft(4, '0')}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
 }

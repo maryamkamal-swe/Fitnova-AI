@@ -83,11 +83,22 @@ class ProgressService {
     if (response is! Map<String, dynamic>) {
       throw const ApiException(message: 'Invalid hydration response.');
     }
+
     final liters = response['liters'];
     if (liters is! num) {
       throw const ApiException(message: 'Invalid hydration total.');
     }
     return liters.toDouble();
+  }
+
+  Future<ProgressEntry> logCaloriesBurned(
+      int calories, {required String date}) async {
+    final response = await _apiClient.post(
+      '${AppConstants.progressEndpoint}/calories-burned',
+      body: {'calories': calories, 'date': date},
+      requiresAuth: true,
+    );
+    return _entryFromResponse(response);
   }
 
   /// Get today's hydration entry

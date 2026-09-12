@@ -6,9 +6,17 @@ from typing import Optional
 from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import HTTPException, status
+from pymongo import ReturnDocument
 from pymongo.errors import PyMongoError
 from ..database import get_database
-from ..models.user import UserCreate, UserLogin, UserResponse, TokenResponse
+from ..models.user import (
+    RegistrationResponse,
+    UserCreate,
+    UserLogin,
+    UserResponse,
+    TokenResponse,
+)
+from .otp_service import issue_otp
 from ..utils.security import (
     hash_password,
     verify_password,
@@ -55,9 +63,10 @@ class AuthService:
             {"$set": {"revoked": True, "revoked_at": datetime.now(timezone.utc)}},
         )
     
-    async def register_user(self, user_data: UserCreate) -> TokenResponse:
+    async def register_user(self, user_data: UserCreate) -> RegistrationResponse:
         collection = self._get_collection()
-        existing_user = await collection.find_one({"email": user_data.email})
+        email = str(user_data.email).lower().strip()
+        existing_user = await collection.find_one({"email": email})
         if existing_user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -67,7 +76,7 @@ class AuthService:
         hashed_password = hash_password(user_data.password)
         
         user_doc = {
-            "email": user_data.email,
+            "email": email,
             "password_hash": hashed_password,
             "profile": user_data.profile.model_dump(mode="json") if user_data.profile else {},
             "profile_complete": user_data.profile is not None,
@@ -76,28 +85,33 @@ class AuthService:
             "updated_at": datetime.utcnow()
         }
         
-        result = await collection.insert_one(user_doc)
-        user_id = str(result.inserted_id)
-        
-        return await self._issue_tokens(user_id)
+        await collection.insert_one(user_doc)
+        otp_result = await issue_otp(email)
+        return RegistrationResponse(
+            email=email,
+            message="Registration successful. Please verify your email with OTP.",
+            delivered=otp_result["delivered"],
+            development_code=otp_result.get("development_code"),
+        )
 
-    async def mark_email_verified(self, email: str) -> bool:
+    async def mark_email_verified(self, email: str) -> Optional[str]:
         """Persist successful email verification for the matching user."""
         collection = self._get_collection()
-        result = await collection.update_one(
-            {"email": email.lower().strip()},
+        user = await collection.find_one_and_update(
+            {"email": email.lower().strip(), "email_verified": {"$ne": True}},
             {
                 "$set": {
                     "email_verified": True,
                     "updated_at": datetime.utcnow(),
                 }
             },
+            return_document=ReturnDocument.AFTER,
         )
-        return result.matched_count > 0
+        return str(user["_id"]) if user else None
     
     async def login_user(self, login_data: UserLogin) -> TokenResponse:
         collection = self._get_collection()
-        user = await collection.find_one({"email": login_data.email})
+        user = await collection.find_one({"email": str(login_data.email).lower().strip()})
         
         if not user or not verify_password(login_data.password, user["password_hash"]):
             raise HTTPException(
@@ -105,6 +119,12 @@ class AuthService:
                 detail="Invalid email or password"
             )
         
+        if user.get("email_verified") is not True:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Email not verified. Please verify your email with OTP before logging in.",
+            )
+
         user_id = str(user["_id"])
         return await self._issue_tokens(user_id)
     
@@ -137,6 +157,11 @@ class AuthService:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User not found"
+            )
+        if user.get("email_verified") is not True:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Email not verified. Please verify your email with OTP before logging in.",
             )
         
         await self.db.refresh_tokens.update_one(

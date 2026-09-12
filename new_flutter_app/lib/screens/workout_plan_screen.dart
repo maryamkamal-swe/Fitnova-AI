@@ -151,9 +151,32 @@ class _WorkoutPlanScreenState extends State<WorkoutPlanScreen> {
             ),
           if (plan != null) ...plan.plan.days.map(_dayCard),
           if (plan == null && !_loading)
-            const Text(
-              'Temporary Placeholder',
-              style: TextStyle(color: Colors.transparent, fontSize: 1),
+            Card(
+              margin: const EdgeInsets.only(top: 16),
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    const Icon(Icons.fitness_center, size: 40),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'No workout plan yet',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Generate a personalized plan to see your weekly workouts.',
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 14),
+                    ElevatedButton.icon(
+                      onPressed: _generate,
+                      icon: const Icon(Icons.auto_awesome),
+                      label: const Text('Generate workout plan'),
+                    ),
+                  ],
+                ),
+              ),
             ),
         ],
       ),
@@ -194,7 +217,7 @@ class _WorkoutPlanScreenState extends State<WorkoutPlanScreen> {
                           progressService: ProgressService(),
                         ),
                       ),
-                    ),
+                    ).then((_) => _load()),
             icon: const Icon(Icons.play_arrow),
           ),
           children: day.exercises

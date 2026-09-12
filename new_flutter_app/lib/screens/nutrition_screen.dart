@@ -22,6 +22,7 @@ class _NutritionScreenState extends State<NutritionScreen> {
   ProgressEntry? _todayProgress;
   double _calorieTarget = 0;
   bool _isLoading = false;
+  bool _savingFood = false;
   String? _errorMessage;
 
   double get _calories =>
@@ -40,7 +41,9 @@ class _NutritionScreenState extends State<NutritionScreen> {
       _errorMessage = null;
     });
     try {
+      final localDate = _dateOnly(DateTime.now());
       final todayProgress = await _progressService.getTodayProgress();
+      final foods = await _mealPlanService.getFoodLogs(date: localDate);
       MealPlan? mealPlan;
       try {
         mealPlan = await _mealPlanService.getCurrent();
@@ -50,6 +53,9 @@ class _NutritionScreenState extends State<NutritionScreen> {
       if (!mounted) return;
       setState(() {
         _todayProgress = todayProgress;
+        _foods
+          ..clear()
+          ..addAll(foods.map(_foodFromJson));
         _calorieTarget = mealPlan?.dailyCalorieTarget ?? 0;
         _isLoading = false;
       });
@@ -103,53 +109,65 @@ class _NutritionScreenState extends State<NutritionScreen> {
     name.dispose();
     calories.dispose();
     if (result != null) {
-      setState(() => _foods.add(result));
-      _saveFood(result);
+      await _saveFood(result);
     }
   }
 
   Future<void> _saveFood(_FoodEntry food) async {
+    if (_savingFood) return;
     setState(() {
+      _savingFood = true;
       _isLoading = true;
       _errorMessage = null;
     });
     try {
-      await _mealPlanService.logFoodEntry(
+      final response = await _mealPlanService.logFoodEntry(
         food.name,
         food.calories,
         meal: food.meal,
+        date: _dateOnly(DateTime.now()),
       );
-      final today = await _progressService.getTodayProgress();
-      final total = (today?.caloriesConsumed ?? 0) + food.calories;
-      if (today?.id != null && today!.id!.isNotEmpty) {
-        await _progressService.updateProgress(
-          today.id!,
-          today.copyWith(caloriesConsumed: total),
-        );
-      } else {
-        await _progressService.logProgress(
-          ProgressEntry(
-            date: DateTime.now(),
-            caloriesConsumed: total,
-          ),
-        );
-      }
       if (mounted) {
-        setState(() => _isLoading = false);
+        final progress = response['progress'];
+        final foods = response['foods'];
+        setState(() {
+          _todayProgress = progress is Map<String, dynamic>
+              ? ProgressEntry.fromJson(progress)
+              : _todayProgress;
+          _foods
+            ..clear()
+            ..addAll(foods is List
+                ? foods
+                    .whereType<Map<String, dynamic>>()
+                    .map(_foodFromJson)
+                : <_FoodEntry>[]);
+          _isLoading = false;
+          _savingFood = false;
+        });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _foods.remove(food);
           _errorMessage = 'Failed to save food entry';
           _isLoading = false;
+          _savingFood = false;
         });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not save food entry.')),
         );
       }
     }
+
   }
+
+  _FoodEntry _foodFromJson(Map<String, dynamic> json) => _FoodEntry(
+        (json['food_name'] ?? json['name'] ?? 'Food').toString(),
+        (json['meal_type'] ?? 'Snack').toString(),
+        (json['calories'] as num?)?.round() ?? 0,
+      );
+
+  String _dateOnly(DateTime value) =>
+      '${value.year.toString().padLeft(4, '0')}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -197,7 +215,7 @@ class _NutritionScreenState extends State<NutritionScreen> {
                 )),
             const SizedBox(height: 12),
             OutlinedButton.icon(
-              onPressed: _addFood,
+              onPressed: _savingFood ? null : _addFood,
               icon: const Icon(Icons.add),
               label: const Text('Add food'),
             ),

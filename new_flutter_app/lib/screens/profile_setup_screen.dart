@@ -185,13 +185,19 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
             _dropdown(
                 'Fitness goal',
                 _goal,
-                ['weight_loss', 'muscle_gain', 'maintenance'],
+                [
+                  'weight_loss',
+                  'muscle_gain',
+                  'maintenance',
+                  'endurance',
+                  'flexibility'
+                ],
                 (value) => setState(() => _goal = value),
                 validator: _goalValidator),
             _dropdown(
                 'Activity level',
                 _activity,
-                ['sedentary', 'light', 'moderate', 'active'],
+                ['sedentary', 'light', 'moderate', 'active', 'very_active'],
                 (value) => setState(() => _activity = value)),
             _dropdown(
                 'Fitness experience',

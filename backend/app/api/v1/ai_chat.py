@@ -1,4 +1,5 @@
 import logging
+from datetime import date as date_type
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -10,6 +11,7 @@ from app.database import DEFAULT_RAG_PROFILE, get_user_profile
 from app.services.rag_service import rag_service
 from app.core.limiter import limiter
 from app.utils.security import get_current_user_id
+from app.services.progress_service import ProgressService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -32,6 +34,8 @@ class ChatRequest(BaseModel):
         default=None,
         description="Optional profile override (for testing without MongoDB)",
     )
+    calories_consumed: Optional[int] = Field(default=None, ge=0)
+    date: date_type = Field(default_factory=date_type.today)
 
 
 class ChatResponse(BaseModel):
@@ -51,6 +55,12 @@ async def chat_endpoint(
     user_id: str = Depends(get_current_user_id),
 ):
     try:
+        if payload.calories_consumed:
+            await ProgressService().increment_progress(
+                user_id,
+                payload.date,
+                calories_consumed=payload.calories_consumed,
+            )
         # Map the test payload first, fallback to DB fetch.
         user_profile = (
             payload.user_profile
@@ -91,6 +101,12 @@ async def chat_stream_endpoint(
     payload: ChatRequest,
     user_id: str = Depends(get_current_user_id),
 ):
+    if payload.calories_consumed:
+        await ProgressService().increment_progress(
+            user_id,
+            payload.date,
+            calories_consumed=payload.calories_consumed,
+        )
     user_profile = payload.user_profile or await get_user_profile(user_id) or DEFAULT_RAG_PROFILE
 
     return StreamingResponse(

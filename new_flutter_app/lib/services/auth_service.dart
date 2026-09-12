@@ -1,3 +1,5 @@
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../core/constants.dart';
 import '../models/auth_response.dart';
 import 'api_client.dart';
@@ -25,6 +27,30 @@ class OtpSendResult {
       developmentCode: data['development_code'] as String?,
       message: (data['message'] as String?) ??
           'A verification code is ready for this email.',
+    );
+  }
+}
+
+class RegistrationResult {
+  final String email;
+  final String message;
+  final bool delivered;
+  final String? developmentCode;
+
+  const RegistrationResult({
+    required this.email,
+    required this.message,
+    required this.delivered,
+    this.developmentCode,
+  });
+
+  factory RegistrationResult.fromJson(dynamic json) {
+    final data = json is Map<String, dynamic> ? json : <String, dynamic>{};
+    return RegistrationResult(
+      email: (data['email'] as String?) ?? '',
+      message: (data['message'] as String?) ?? 'Registration successful.',
+      delivered: data['delivered'] == true,
+      developmentCode: data['development_code'] as String?,
     );
   }
 }
@@ -68,9 +94,8 @@ class AuthService {
     return authResponse;
   }
 
-  /// Registers a new account before profile setup.
-  /// If the backend returns a token upon registration, it is securely persisted.
-  Future<AuthResponse?> register({
+  /// Registers an unverified account and returns the initial OTP delivery result.
+  Future<RegistrationResult> register({
     required String email,
     required String password,
   }) async {
@@ -83,20 +108,10 @@ class AuthService {
       requiresAuth: false,
     );
 
-    if (response is Map<String, dynamic>) {
-      // Check if registration response contains a token
-      if (response.containsKey('access_token') ||
-          response.containsKey('accessToken')) {
-        final authResponse = AuthResponse.fromJson(response);
-        await _tokenStorage.saveToken(authResponse.accessToken);
-        if (authResponse.refreshToken != null) {
-          await _tokenStorage.saveRefreshToken(authResponse.refreshToken!);
-        }
-        return authResponse;
-      }
+    if (response is! Map<String, dynamic>) {
+      throw const ApiException(message: 'The server returned an invalid registration response.');
     }
-
-    return null;
+    return RegistrationResult.fromJson(response);
   }
 
   Future<OtpSendResult> sendOtp({required String email}) async {
@@ -108,12 +123,21 @@ class AuthService {
     return OtpSendResult.fromJson(response);
   }
 
-  Future<void> verifyOtp({required String email, required String otp}) async {
-    await _apiClient.post(
+  Future<AuthResponse> verifyOtp({required String email, required String otp}) async {
+    final response = await _apiClient.post(
       AppConstants.verifyOtpEndpoint,
       body: {'email': email.trim(), 'otp': otp.trim()},
       requiresAuth: false,
     );
+    if (response is! Map<String, dynamic>) {
+      throw const ApiException(message: 'The server returned an invalid verification response.');
+    }
+    final authResponse = AuthResponse.fromJson(response);
+    await _tokenStorage.saveToken(authResponse.accessToken);
+    if (authResponse.refreshToken != null) {
+      await _tokenStorage.saveRefreshToken(authResponse.refreshToken!);
+    }
+    return authResponse;
   }
 
   /// Clears stored credentials and logs out the current user.
@@ -128,6 +152,10 @@ class AuthService {
       // or the server is temporarily unreachable.
     }
     await _tokenStorage.deleteToken();
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.remove('isProfileCompleted');
+    await preferences.remove('onboarding_completed');
+    await preferences.remove('dashboard_tour_completed');
   }
 
   Future<AuthResponse> refresh(String refreshToken) async {

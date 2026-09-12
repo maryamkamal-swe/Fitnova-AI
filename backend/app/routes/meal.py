@@ -1,13 +1,16 @@
 from datetime import date, datetime
 
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from bson.errors import InvalidId
 
 from app.database import get_database
 from app.models.meal import MealPlanRequest, MealPlanResponse
 from app.services.meal_planner_service import generate_weekly_meal_plan
+from app.services.calorie_service import calculate_food_nutrition
+from app.services.food_filter_service import DEFAULT_STAPLE_FOODS
+from app.services.progress_service import ProgressService
 from app.utils.security import get_current_user_id
 from app.core.limiter import limiter
 
@@ -17,12 +20,16 @@ date_type = date
 
 class FoodLogRequest(BaseModel):
     food_name: str = Field(..., min_length=1, max_length=200)
-    calories: float = Field(..., ge=0, le=100_000)
+    food_id: str | None = Field(default=None, min_length=1, max_length=200)
+    calories: float | None = Field(default=None, ge=0, le=100_000)
     meal_type: str = Field(default="snack", min_length=1, max_length=50)
     protein_g: float | None = Field(default=None, ge=0, le=10_000)
     carbs_g: float | None = Field(default=None, ge=0, le=10_000)
     fat_g: float | None = Field(default=None, ge=0, le=10_000)
-    date: date_type | None = None
+    serving_grams: float = Field(default=100, gt=0, le=100_000)
+    serving_size_grams: float | None = Field(default=None, gt=0, le=100_000)
+    servings: float = Field(default=1, gt=0, le=100)
+    date: date_type = Field(default_factory=date.today)
 
 
 class RecipePreparationRequest(BaseModel):
@@ -70,20 +77,101 @@ async def log_food_entry(
 
     Requires authentication.
     """
-    collection = get_database().food_logs
+    database = get_database()
+    reference = None
+    if food_data.food_id:
+        reference = await database.foods_ref.find_one({"id": food_data.food_id})
+        if reference is None:
+            reference = next(
+                (food for food in DEFAULT_STAPLE_FOODS if food["id"] == food_data.food_id),
+                None,
+            )
+    if reference is None:
+        reference = await database.foods_ref.find_one(
+            {"name": {"$regex": f"^{food_data.food_name}$", "$options": "i"}}
+        )
+    if reference is None:
+        reference = next(
+            (
+                food for food in DEFAULT_STAPLE_FOODS
+                if food["name"].lower() == food_data.food_name.lower()
+            ),
+            None,
+        )
+
+    serving_grams = food_data.serving_size_grams or food_data.serving_grams
+    if reference is not None:
+        nutrition = calculate_food_nutrition(
+            reference, serving_grams, food_data.servings
+        )
+        canonical_name = reference.get("name", food_data.food_name)
+        canonical_id = str(reference.get("id") or food_data.food_id or canonical_name)
+    elif food_data.calories is not None:
+        # Compatibility for free-form foods that are not in the reference set.
+        nutrition = {
+            "calories": round(food_data.calories, 2),
+            "protein_g": food_data.protein_g,
+            "carbs_g": food_data.carbs_g,
+            "fat_g": food_data.fat_g,
+            "serving_grams": round(serving_grams * food_data.servings, 2),
+        }
+        canonical_name = food_data.food_name.strip()
+        canonical_id = food_data.food_id or canonical_name.lower().replace(" ", "-")
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Food must include a reference food or calories",
+        )
+
+    collection = database.food_logs
+    now = datetime.utcnow()
     food_doc = {
         "user_id": user_id,
-        "food_name": food_data.food_name,
-        "calories": food_data.calories,
+        "food_id": canonical_id,
+        "food_name": canonical_name,
+        **nutrition,
         "meal_type": food_data.meal_type,
-        "protein_g": food_data.protein_g,
-        "carbs_g": food_data.carbs_g,
-        "fat_g": food_data.fat_g,
-        "date": datetime.combine(food_data.date, datetime.min.time()) if food_data.date else datetime.utcnow(),
-        "created_at": datetime.utcnow(),
+        "date": datetime.combine(food_data.date, datetime.min.time()),
+        "created_at": now,
     }
     result = await collection.insert_one(food_doc)
-    return {"message": "Food logged successfully", "id": str(result.inserted_id)}
+    progress = await ProgressService().increment_progress(
+        user_id, food_data.date, calories_consumed=round(nutrition["calories"])
+    )
+    food_doc["id"] = str(result.inserted_id)
+    food_doc.pop("_id", None)
+    logged_foods = await collection.find(
+        {
+            "user_id": user_id,
+            "date": datetime.combine(food_data.date, datetime.min.time()),
+        }
+    ).sort("created_at", 1).to_list(length=200)
+    foods_response = []
+    for item in logged_foods:
+        item["id"] = str(item.pop("_id"))
+        foods_response.append(item)
+    return {
+        "message": "Food logged successfully",
+        "id": str(result.inserted_id),
+        "food": food_doc,
+        "foods": foods_response,
+        "progress": progress.model_dump(mode="json"),
+    }
+
+
+@router.get("/food-log")
+async def get_food_log(
+    date_value: date_type = Query(default_factory=date.today, alias="date"),
+    user_id: str = Depends(get_current_user_id),
+):
+    """Return canonical food entries for one local calendar date."""
+    day = datetime.combine(date_value, datetime.min.time())
+    entries = await get_database().food_logs.find(
+        {"user_id": user_id, "date": day}
+    ).sort("created_at", 1).to_list(length=200)
+    for entry in entries:
+        entry["id"] = str(entry.pop("_id"))
+    return {"date": str(date_value), "foods": entries}
 
 
 

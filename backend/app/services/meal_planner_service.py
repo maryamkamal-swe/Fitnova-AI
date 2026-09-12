@@ -6,7 +6,11 @@ from typing import Optional
 from app.models.meal import MealPlanRequest, WeeklyMealPlan, MealPlanResponse, PlannedMealItem
 from app.models.user import FitnessGoal, ActivityLevel, Gender
 from app.services.user_lookup import get_user_profile
-from app.services.calorie_service import calculate_daily_target, split_into_meals
+from app.services.calorie_service import (
+    calculate_daily_target,
+    calculate_food_nutrition,
+    split_into_meals,
+)
 from app.services.food_filter_service import get_candidate_foods, format_food_candidates_for_prompt
 from app.services.llm_service import generate_structured
 
@@ -61,11 +65,12 @@ def _rescale_items(items: list[PlannedMealItem], target_kcal: float, food_lookup
         food = food_lookup[item.food_id]
         cal_per_100g = food["calories_per_100g"]
         portion_g = round((per_item_target / cal_per_100g) * 100, 1) if cal_per_100g else 0
+        nutrition = calculate_food_nutrition(food, portion_g)
         result.append({
             "food_id": item.food_id,
             "food_name": item.food_name,
             "portion_grams": portion_g,
-            "calories": round((portion_g / 100) * cal_per_100g),
+            "calories": nutrition["calories"],
         })
     return result
 

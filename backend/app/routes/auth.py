@@ -5,9 +5,16 @@ Handles registration, login, logout, token refresh
 from fastapi import APIRouter, HTTPException, Request, status, Depends
 from app.core.limiter import limiter
 from pydantic import BaseModel, EmailStr, Field
-from ..models.user import UserCreate, UserLogin, TokenResponse, TokenRefresh, PasswordChange
+from ..models.user import (
+    RegistrationResponse,
+    UserCreate,
+    UserLogin,
+    TokenResponse,
+    TokenRefresh,
+    PasswordChange,
+)
 from ..services.auth_service import AuthService
-from ..services.otp_service import issue_otp, verify_otp
+from ..services.otp_service import consume_otp, issue_otp, verify_otp
 from ..utils.security import get_current_user_id
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -23,7 +30,11 @@ class VerifyOtpRequest(BaseModel):
     otp: str = Field(..., min_length=6, max_length=6)
 
 
-@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register",
+    response_model=RegistrationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 @limiter.limit("10/hour")
 async def register(request: Request, user_data: UserCreate):
     """
@@ -33,7 +44,7 @@ async def register(request: Request, user_data: UserCreate):
     - **password**: Minimum 8 characters with at least one digit and uppercase letter
     - **profile**: Optional user profile information
     
-    Returns JWT access and refresh tokens
+    Creates an unverified account and sends an email verification OTP.
     """
     return await auth_service.register_user(user_data)
 
@@ -114,13 +125,11 @@ async def get_current_user(user_id: str = Depends(get_current_user_id)):
     return user
 
 
-import asyncio
-
 @router.post("/send-otp")
 @limiter.limit("5/hour")
 async def send_otp(request: Request, payload: SendOtpRequest):
     """Send a rate-limited 6-digit email OTP."""
-    return await asyncio.to_thread(issue_otp, str(payload.email))
+    return await issue_otp(str(payload.email))
 
 
 @router.post("/verify-otp")
@@ -128,16 +137,18 @@ async def send_otp(request: Request, payload: SendOtpRequest):
 
 async def verify_email_otp(request: Request, payload: VerifyOtpRequest):
     """Confirm a previously issued OTP."""
-    if not verify_otp(str(payload.email), payload.otp):
+    otp_record = await verify_otp(str(payload.email), payload.otp)
+    if not otp_record:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired verification code",
         )
     email = str(payload.email)
-    user_updated = await auth_service.mark_email_verified(email)
-    if not user_updated:
+    user_id = await auth_service.mark_email_verified(email)
+    if not user_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No user account exists for this email",
         )
-    return {"verified": True, "email": email}
+    await consume_otp(otp_record["_id"])
+    return await auth_service._issue_tokens(user_id)

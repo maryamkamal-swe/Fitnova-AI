@@ -128,10 +128,34 @@ class _MealPlanScreenState extends State<MealPlanScreen> {
                 style: Theme.of(context).textTheme.titleLarge),
             ...plan.plan.days.map(_dayCard),
           ],
-          // Kept in the empty state for compatibility with older dashboard
-          // clients that used this label while the planner was loading.
           if (plan == null && !_loading)
-            const Offstage(child: Text('Temporary Placeholder')),
+            Card(
+              margin: const EdgeInsets.only(top: 16),
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    const Icon(Icons.restaurant_menu, size: 40),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'No meal plan yet',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Generate a personalized plan to see your meals for the week.',
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 14),
+                    ElevatedButton.icon(
+                      onPressed: _generate,
+                      icon: const Icon(Icons.auto_awesome),
+                      label: const Text('Generate meal plan'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
         ],
       ),
     );

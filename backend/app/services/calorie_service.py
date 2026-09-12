@@ -70,6 +70,25 @@ def split_into_meals(daily_calories: float) -> dict:
     return {meal: round(daily_calories * pct) for meal, pct in MEAL_SPLIT.items()}
 
 
+def calculate_food_nutrition(
+    food: dict,
+    serving_grams: float,
+    servings: float = 1,
+) -> dict:
+    """Calculate canonical calories and macros for a reference-food serving."""
+    grams = serving_grams * servings
+    if grams <= 0:
+        raise ValueError("Serving size must be greater than zero")
+    factor = grams / 100
+    return {
+        "calories": round(float(food.get("calories_per_100g") or 0) * factor, 2),
+        "protein_g": round(float(food.get("protein_g_per_100g") or 0) * factor, 2),
+        "carbs_g": round(float(food.get("carbs_g_per_100g") or 0) * factor, 2),
+        "fat_g": round(float(food.get("fat_g_per_100g") or 0) * factor, 2),
+        "serving_grams": round(grams, 2),
+    }
+
+
 def adjust_target_for_weight_trend(
     current_target: float,
     weekly_avg_weight_change_kg: float,

@@ -4,7 +4,8 @@ Custom validators for data validation
 from datetime import date
 from typing import Optional
 
-from app.services.calorie_service import calculate_bmr
+from app.models.user import ActivityLevel
+from app.services.calorie_service import calculate_bmr, calculate_tdee as _calculate_tdee
 
 
 def validate_date_range(start_date: Optional[date], end_date: Optional[date]) -> tuple:
@@ -85,12 +86,12 @@ def get_bmi_category(bmi: float) -> str:
     """
     if bmi < 18.5:
         return "Underweight"
-    elif 18.5 <= bmi < 25:
+    elif bmi < 23:
         return "Normal weight"
-    elif 25 <= bmi < 30:
-        return "Overweight"
+    elif bmi < 27.5:
+        return "Increased Risk / Overweight"
     else:
-        return "Obese"
+        return "High Risk / Obese"
 
 
 def calculate_tdee(bmr: float, activity_level: str) -> float:
@@ -104,15 +105,8 @@ def calculate_tdee(bmr: float, activity_level: str) -> float:
     Returns:
         TDEE in calories/day
     """
-    activity_multipliers = {
-        "sedentary": 1.2,      # Little or no exercise
-        "light": 1.375,        # Light exercise 1-3 days/week
-        "moderate": 1.55,      # Moderate exercise 3-5 days/week
-        "active": 1.725,       # Heavy exercise 6-7 days/week
-        "very_active": 1.9     # Very heavy exercise, physical job
-    }
-    
-    multiplier = activity_multipliers.get(activity_level.lower(), 1.2)
-    tdee = bmr * multiplier
-    
-    return round(tdee, 2)
+    try:
+        level = ActivityLevel(str(activity_level).lower())
+    except ValueError:
+        level = ActivityLevel.SEDENTARY
+    return round(_calculate_tdee(bmr, level), 2)

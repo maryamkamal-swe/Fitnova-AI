@@ -1,8 +1,10 @@
 // new_flutter_app/lib/screens/chat_screen.dart
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:record/record.dart';
 
 import '../core/theme.dart';
@@ -42,6 +44,9 @@ class _ChatScreenState extends State<ChatScreen> {
   final _audioPlayer = VoiceAudioPlayer();
   final AudioRecorder _recorder = AudioRecorder();
   String? _recordingPath;
+  String? _playingMessage;
+  int _playbackRequestId = 0;
+  StreamSubscription<PlayerState>? _audioStateSubscription;
   bool _waitingForFirstChunk = false;
   bool _loggingProgress = false;
 
@@ -50,6 +55,12 @@ class _ChatScreenState extends State<ChatScreen> {
     super.initState();
     _chatService = widget.chatService ?? ChatService();
     _voiceService = widget.voiceService ?? VoiceService();
+    _audioStateSubscription =
+        _audioPlayer.onPlayerStateChanged.listen((state) {
+      if (state == PlayerState.completed || state == PlayerState.stopped) {
+        if (mounted) setState(() => _playingMessage = null);
+      }
+    });
     _loadLanguages();
   }
 
@@ -202,6 +213,17 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _playMessageAudio(String text) async {
+    if (_playingMessage == text) {
+      _playbackRequestId++;
+      await _audioPlayer.stop();
+      if (mounted) setState(() => _playingMessage = null);
+      return;
+    }
+    final requestId = ++_playbackRequestId;
+    if (_playingMessage != null) {
+      await _audioPlayer.stop();
+    }
+    if (mounted) setState(() => _playingMessage = text);
     try {
       final language = _languages.isEmpty 
           ? 'en-US'
@@ -219,10 +241,18 @@ class _ChatScreenState extends State<ChatScreen> {
         text: text,
         languageCode: language,
       );
-      if (base64Audio.isNotEmpty) {
-        await _audioPlayer.play(base64Audio);
+      if (requestId != _playbackRequestId || _playingMessage != text) return;
+      if (base64Audio.isEmpty) {
+        if (mounted) setState(() => _playingMessage = null);
+        return;
       }
+      await _audioPlayer.play(base64Audio);
     } catch (_) {
+      if (mounted &&
+          requestId == _playbackRequestId &&
+          _playingMessage == text) {
+        setState(() => _playingMessage = null);
+      }
       _showError('Unable to generate or play voice audio for this message.');
     }
   }
@@ -320,6 +350,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _controller.dispose();
     _scrollController.dispose();
     _recorder.dispose();
+    _audioStateSubscription?.cancel();
     final path = _recordingPath;
     if (path != null) deleteRecording(path);
     _audioPlayer.dispose();
@@ -442,8 +473,17 @@ class _ChatScreenState extends State<ChatScreen> {
                                   alignment: Alignment.centerRight,
                                   child: TextButton.icon(
                                     onPressed: () => _playMessageAudio(message.text),
-                                    icon: const Icon(Icons.volume_up, size: 16),
-                                    label: const Text('Listen'),
+                                    icon: Icon(
+                                      _playingMessage == message.text
+                                          ? Icons.stop
+                                          : Icons.volume_up,
+                                      size: 16,
+                                    ),
+                                    label: Text(
+                                      _playingMessage == message.text
+                                          ? 'Stop'
+                                          : 'Listen',
+                                    ),
                                     style: TextButton.styleFrom(
                                       foregroundColor: AppTheme.primary,
                                       padding: EdgeInsets.zero,

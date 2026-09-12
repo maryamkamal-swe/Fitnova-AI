@@ -341,9 +341,19 @@ class _AuthPageState extends State<AuthPage> {
     setState(() => _busy = true);
     try {
       if (_register) {
-        await widget.auth
+        final registration = await widget.auth
             .register(email: _email.text, password: _password.text);
-        await widget.auth.login(email: _email.text, password: _password.text);
+        if (!mounted) return;
+        Navigator.of(context).pushReplacementNamed(
+          AppConstants.emailVerificationRoute,
+          arguments: {
+            'email': registration.email.isEmpty
+                ? _email.text.trim()
+                : registration.email,
+            'developmentCode': registration.developmentCode,
+          },
+        );
+        return;
       } else {
         await widget.auth.login(email: _email.text, password: _password.text);
       }
@@ -438,6 +448,7 @@ class FitNovaShell extends StatefulWidget {
 
 class _FitNovaShellState extends State<FitNovaShell> {
   int _index = 0;
+  int _refreshToken = 0;
   int _tourStep = 0;
   bool _showTour = false;
   bool _backendOnline = false;
@@ -452,13 +463,14 @@ class _FitNovaShellState extends State<FitNovaShell> {
           profile: _profile,
           progress: _progress,
           backendOnline: _backendOnline,
+          refreshToken: _refreshToken,
         ),
         WorkoutPlanScreen(
           workoutPlanService: _workouts,
           initialProfile: widget.initialProfile,
         ),
         MealPlanScreen(mealPlanService: _meals),
-        ProgressPage(service: _progress),
+        ProgressPage(service: _progress, refreshToken: _refreshToken),
         ChatScreen(chatService: _chat, voiceService: _voice),
         ProfileScreen(
           profileService: _profile,
@@ -505,6 +517,7 @@ class _FitNovaShellState extends State<FitNovaShell> {
                   setState(() {
                     _tourStep = next;
                     _index = dashboardTourSteps[next].tabIndex;
+                    _refreshToken++;
                   });
                 },
                 onFinished: () => setState(() => _showTour = false),
@@ -514,7 +527,10 @@ class _FitNovaShellState extends State<FitNovaShell> {
         bottomNavigationBar: NavigationBar(
             selectedIndex: _index,
             labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
-            onDestinationSelected: (i) => setState(() => _index = i),
+            onDestinationSelected: (i) => setState(() {
+              _index = i;
+              _refreshToken++;
+            }),
             destinations: const [
               NavigationDestination(
                   icon: Icon(Icons.grid_view_outlined),
@@ -548,21 +564,40 @@ class DashboardPage extends StatefulWidget {
   final ProfileService profile;
   final ProgressService progress;
   final bool backendOnline;
+  final int refreshToken;
   const DashboardPage({
     super.key,
     required this.profile,
     required this.progress,
     required this.backendOnline,
+    this.refreshToken = 0,
   });
   @override
   State<DashboardPage> createState() => _DashboardPageState();
 }
 
 class _DashboardPageState extends State<DashboardPage> {
-  late final Future<List<Object?>> _load = Future.wait([
-    widget.profile.getProfile(),
-    widget.progress.getProgressStats(),
-  ]);
+  late Future<List<Object?>> _load;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  @override
+  void didUpdateWidget(covariant DashboardPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.refreshToken != widget.refreshToken) _refresh();
+  }
+
+  void _refresh() {
+    _load = Future.wait([
+      widget.profile.getProfile(),
+      widget.progress.getProgressStats(),
+    ]);
+    if (mounted) setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) => FutureBuilder<List<Object?>>(
@@ -617,7 +652,7 @@ class _DashboardPageState extends State<DashboardPage> {
                       context,
                       MaterialPageRoute(
                           builder: (_) => const HydrationScreen()),
-                    ),
+                    ).then((_) => _refresh()),
                     icon: const Icon(Icons.water_drop_outlined),
                     label: const Text('Hydration'),
                   ),
@@ -626,7 +661,7 @@ class _DashboardPageState extends State<DashboardPage> {
                       context,
                       MaterialPageRoute(
                           builder: (_) => const NutritionScreen()),
-                    ),
+                    ).then((_) => _refresh()),
                     icon: const Icon(Icons.restaurant_outlined),
                     label: const Text('Log food'),
                   ),
@@ -637,7 +672,7 @@ class _DashboardPageState extends State<DashboardPage> {
                           builder: (_) => DailyProgressScreen(
                                 progressService: widget.progress,
                               )),
-                    ),
+                    ).then((_) => _refresh()),
                     icon: const Icon(Icons.edit_calendar_outlined),
                     label: const Text('Log today'),
                   ),
@@ -649,13 +684,32 @@ class _DashboardPageState extends State<DashboardPage> {
 
 class ProgressPage extends StatefulWidget {
   final ProgressService service;
-  const ProgressPage({super.key, required this.service});
+  final int refreshToken;
+  const ProgressPage(
+      {super.key, required this.service, this.refreshToken = 0});
   @override
   State<ProgressPage> createState() => _ProgressPageState();
 }
 
 class _ProgressPageState extends State<ProgressPage> {
-  late final Future<ProgressStats> _load = widget.service.getProgressStats();
+  late Future<ProgressStats> _load;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  @override
+  void didUpdateWidget(covariant ProgressPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.refreshToken != widget.refreshToken) _refresh();
+  }
+
+  void _refresh() {
+    _load = widget.service.getProgressStats();
+    if (mounted) setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) => FutureBuilder<ProgressStats>(
@@ -688,7 +742,7 @@ class _ProgressPageState extends State<ProgressPage> {
                           progressService: widget.service,
                         ),
                       ),
-                    ),
+                    ).then((_) => _refresh()),
                     icon: const Icon(Icons.edit_calendar_outlined),
                     label: const Text('Log today'),
                   ),
@@ -703,7 +757,7 @@ class _ProgressPageState extends State<ProgressPage> {
                           progressService: widget.service,
                         ),
                       ),
-                    ),
+                    ).then((_) => _refresh()),
                     icon: const Icon(Icons.insights_outlined),
                     label: const Text('Details'),
                   ),

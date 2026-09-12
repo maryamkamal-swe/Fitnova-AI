@@ -1,5 +1,6 @@
-# backend/app/services/otp_service.py
 from __future__ import annotations
+
+import asyncio
 import logging
 import secrets
 import smtplib
@@ -8,11 +9,11 @@ from email.message import EmailMessage
 from typing import Optional
 
 from app.config import settings
+from app.database import get_database
 
 logger = logging.getLogger(__name__)
 
 _OTP_TTL = timedelta(minutes=10)
-_store: dict[str, tuple[str, datetime]] = {}
 
 
 def smtp_configured() -> bool:
@@ -23,26 +24,36 @@ def _generate_otp() -> str:
     return f"{secrets.randbelow(900000) + 100000:06d}"
 
 
-def create_otp(email: str) -> str:
+async def create_otp(email: str) -> tuple[str, datetime]:
+    normalized_email = email.lower().strip()
     code = _generate_otp()
-    expiry = datetime.now(timezone.utc) + _OTP_TTL
-    _store[email.lower().strip()] = (code, expiry)
-    return code
+    now = datetime.now(timezone.utc)
+    expires_at = now + _OTP_TTL
+    await get_database().otps.insert_one(
+        {
+            "email": normalized_email,
+            "code": code,
+            "expires_at": expires_at,
+            "created_at": now,
+        }
+    )
+    return code, expires_at
 
 
-def verify_otp(email: str, otp: str) -> bool:
-    key = email.lower().strip()
-    entry = _store.get(key)
-    if entry is None:
-        return False
-    code, expiry = entry
-    if datetime.now(timezone.utc) > expiry:
-        _store.pop(key, None)
-        return False
-    if code != otp.strip():
-        return False
-    _store.pop(key, None)
-    return True
+async def verify_otp(email: str, otp: str) -> Optional[dict]:
+    """Find an unexpired OTP without consuming it."""
+    now = datetime.now(timezone.utc)
+    return await get_database().otps.find_one(
+        {
+            "email": email.lower().strip(),
+            "code": otp.strip(),
+            "expires_at": {"$gt": now},
+        }
+    )
+
+
+async def consume_otp(otp_id) -> None:
+    await get_database().otps.delete_one({"_id": otp_id})
 
 
 def send_otp_email(email: str, otp: str) -> bool:
@@ -72,22 +83,19 @@ def send_otp_email(email: str, otp: str) -> bool:
                 smtp.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
                 smtp.send_message(message)
         return True
-    except Exception:
+    except Exception as error:
         logger.exception("Failed to send OTP email to %s", email)
-        if settings.ENVIRONMENT.lower() == "development":
-            print(f"[FitNova OTP fallback] {email}: {otp}")
-        return False
+        raise RuntimeError(f"Failed to send OTP email to {email}") from error
 
 
-def issue_otp(email: str) -> dict:
-    otp = create_otp(email)
-    delivered = send_otp_email(email, otp)
-    auto_verified = False
+async def issue_otp(email: str) -> dict:
+    otp, _ = await create_otp(email)
+    delivered = await asyncio.to_thread(send_otp_email, email, otp)
     development_mode = settings.ENVIRONMENT.lower() == "development"
     response = {
         "email": email,
         "delivered": delivered,
-        "auto_verified": auto_verified,
+        "auto_verified": False,
         "message": (
             "A 6-digit code was sent. Check your email."
             if delivered
