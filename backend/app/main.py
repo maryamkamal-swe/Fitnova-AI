@@ -137,6 +137,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 # Configure CORS from ALLOWED_ORIGINS and regex for hosted/local environments
 cors_origins = getattr(settings, "origins_list", []) or [
+    "https://fitnova-frontend.onrender.com",
     "https://fitnova-ai-dv0n.onrender.com",
     "http://localhost:3000",
     "http://localhost:8000",
