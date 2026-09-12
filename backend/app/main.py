@@ -136,24 +136,10 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content={"detail": errors, "error": {"message": "Request validation failed."}},
     )
 
-# Configure CORS from ALLOWED_ORIGINS and regex for hosted/local environments
-cors_origins = getattr(settings, "origins_list", []) or [
-    "https://fitnova-frontend.onrender.com",
-    "https://fitnova-ai-dv0n.onrender.com",
-    "http://localhost:3000",
-    "http://localhost:8000",
-    "http://localhost:8080",
-    "http://127.0.0.1:8080",
-    "http://10.0.2.2:8000",
-    "http://127.0.0.1:8000",
-]
-if not cors_origins:
-    logger.warning("ALLOWED_ORIGINS is empty; browser cross-origin requests are disabled")
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
