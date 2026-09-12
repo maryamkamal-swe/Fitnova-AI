@@ -68,6 +68,14 @@ class AuthService:
         email = str(user_data.email).lower().strip()
         existing_user = await collection.find_one({"email": email})
         if existing_user:
+            if existing_user.get("email_verified") is not True:
+                otp_result = await issue_otp(email)
+                return RegistrationResponse(
+                    email=email,
+                    message="A new verification code has been sent. Please verify your email with OTP.",
+                    delivered=otp_result["delivered"],
+                    development_code=otp_result.get("development_code"),
+                )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email already registered"
@@ -85,8 +93,16 @@ class AuthService:
             "updated_at": datetime.utcnow()
         }
         
-        await collection.insert_one(user_doc)
-        otp_result = await issue_otp(email)
+        result = await collection.insert_one(user_doc)
+        try:
+            otp_result = await issue_otp(email)
+        except RuntimeError as error:
+            await collection.delete_one({"_id": result.inserted_id})
+            await self.db.otps.delete_many({"email": email})
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Email delivery is currently unavailable. Please try again later.",
+            ) from error
         return RegistrationResponse(
             email=email,
             message="Registration successful. Please verify your email with OTP.",
