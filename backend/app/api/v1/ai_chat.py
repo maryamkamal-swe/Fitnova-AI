@@ -50,10 +50,13 @@ async def chat_endpoint(
     payload: ChatRequest,
     user_id: str = Depends(get_current_user_id),
 ):
-    # Map the test payload first, fallback to DB fetch
-    user_profile = payload.user_profile or await get_user_profile(user_id) or DEFAULT_RAG_PROFILE
-
     try:
+        # Map the test payload first, fallback to DB fetch.
+        user_profile = (
+            payload.user_profile
+            or await get_user_profile(user_id)
+            or DEFAULT_RAG_PROFILE
+        )
         result = await rag_service.agenerate_response(
             user_query=payload.query,
             user_profile=user_profile,
@@ -65,8 +68,16 @@ async def chat_endpoint(
             session_id=payload.session_id,
             sources=result["sources"],
         )
-    except Exception:
-        logger.exception("RAG chat request failed")
+    except HTTPException:
+        raise
+    except (TimeoutError, ConnectionError) as error:
+        logger.exception("RAG infrastructure/provider failure: %s", error)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The AI coach is temporarily unavailable. Please try again.",
+        ) from error
+    except Exception as error:
+        logger.exception("RAG chat unexpected failure: %s", error)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while processing your request.",

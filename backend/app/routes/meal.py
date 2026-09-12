@@ -188,8 +188,8 @@ async def log_recipe_preparation(
 
 
 @router.get("/{user_id}", response_model=MealPlanResponse, deprecated=True)
-@router.get("/current", response_model=MealPlanResponse)
 @router.get("/me", response_model=MealPlanResponse)
+@router.get("/current", response_model=MealPlanResponse)
 async def get_current_plan(
     user_id: str | None = None,
     db=Depends(get_database),

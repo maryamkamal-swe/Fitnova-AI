@@ -1,10 +1,12 @@
 # backend/app/services/auth_service.py
 import hashlib
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import HTTPException, status
+from pymongo.errors import PyMongoError
 from ..database import get_database
 from ..models.user import UserCreate, UserLogin, UserResponse, TokenResponse
 from ..utils.security import (
@@ -15,6 +17,8 @@ from ..utils.security import (
     verify_refresh_token,
     decode_token,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class AuthService:
@@ -67,6 +71,7 @@ class AuthService:
             "password_hash": hashed_password,
             "profile": user_data.profile.model_dump(mode="json") if user_data.profile else {},
             "profile_complete": user_data.profile is not None,
+            "email_verified": False,
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow()
         }
@@ -75,6 +80,20 @@ class AuthService:
         user_id = str(result.inserted_id)
         
         return await self._issue_tokens(user_id)
+
+    async def mark_email_verified(self, email: str) -> bool:
+        """Persist successful email verification for the matching user."""
+        collection = self._get_collection()
+        result = await collection.update_one(
+            {"email": email.lower().strip()},
+            {
+                "$set": {
+                    "email_verified": True,
+                    "updated_at": datetime.utcnow(),
+                }
+            },
+        )
+        return result.matched_count > 0
     
     async def login_user(self, login_data: UserLogin) -> TokenResponse:
         collection = self._get_collection()
@@ -135,12 +154,36 @@ class AuthService:
             
         try:
             user = await collection.find_one({"_id": object_id})
-            if user:
-                user["id"] = str(user["_id"])
-                del user["_id"]
-                del user["password_hash"] 
+            if user is None:
+                return None
+            user["id"] = str(user["_id"])
+            del user["_id"]
+            del user["password_hash"]
             return user
-        except Exception:
+        except PyMongoError as error:
+            logger.exception(
+                "MongoDB failure while loading user profile for user_id=%s: %s",
+                user_id,
+                error,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="User service is temporarily unavailable",
+            ) from error
+        except (KeyError, TypeError, AttributeError) as error:
+            logger.error(
+                "Data-integrity error: malformed user document for user_id=%s: %s",
+                user_id,
+                error,
+                exc_info=True,
+            )
+            return None
+        except Exception as error:
+            logger.exception(
+                "Unexpected user profile lookup failure for user_id=%s: %s",
+                user_id,
+                error,
+            )
             return None
     
     async def update_user_profile(self, user_id: str, profile_data: dict) -> bool:

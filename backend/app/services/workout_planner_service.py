@@ -15,11 +15,13 @@ logger = logging.getLogger(__name__)
 # Simple, proven weekly split templates by days/week.
 # The LLM fills each labelled day with real exercises -- it does not invent the split.
 SPLIT_TEMPLATES = {
+    1: ["Full Body"],
     2: ["Full Body A", "Full Body B"],
     3: ["Push", "Pull", "Legs"],
     4: ["Upper", "Lower", "Push", "Pull"],
     5: ["Push", "Pull", "Legs", "Upper", "Lower"],
     6: ["Push", "Pull", "Legs", "Push", "Pull", "Legs"],
+    7: ["Push", "Pull", "Legs", "Upper", "Lower", "Push", "Pull"],
 }
 
 SYSTEM_PROMPT = """You are a certified strength coach building a structured weekly \
@@ -95,7 +97,7 @@ async def generate_workout_plan(
     experience = req.experience_override or FitnessExperience(profile["fitness_experience"])
     goal = req.goal_override or FitnessGoal(profile["fitness_goal"])
 
-    day_labels = SPLIT_TEMPLATES.get(req.days_per_week, SPLIT_TEMPLATES[3])
+    day_labels = SPLIT_TEMPLATES[req.days_per_week]
 
     candidates = await get_candidate_exercises(
         db, req.location, experience, req.excluded_muscle_groups,

@@ -102,6 +102,7 @@ def _fallback_plan(
 async def generate_weekly_meal_plan(
     db, req: MealPlanRequest, weekly_avg_weight_change_kg: Optional[float] = None,
     source: str = "generate_button",
+    override_calorie_target: Optional[float] = None,
 ) -> MealPlanResponse:
     if not req.user_id:
         raise ValueError("Authenticated user id is required to generate a meal plan")
@@ -113,9 +114,13 @@ async def generate_weekly_meal_plan(
     dietary_preferences = profile.get("dietary_preferences", []) or []
 
     # 1. Deterministic calorie target (never AI)
-    daily_target = calculate_daily_target(
-        weight=profile["weight"], height=profile["height"], age=profile["age"],
-        gender=gender, activity_level=activity_level, fitness_goal=goal,
+    daily_target = (
+        override_calorie_target
+        if override_calorie_target is not None
+        else calculate_daily_target(
+            weight=profile["weight"], height=profile["height"], age=profile["age"],
+            gender=gender, activity_level=activity_level, fitness_goal=goal,
+        )
     )
     meal_targets = split_into_meals(daily_target)
 
@@ -147,43 +152,42 @@ async def generate_weekly_meal_plan(
         logger.warning("Structured meal planning failed; using deterministic reference-food fallback: %s", exc)
         raw_plan = _fallback_plan(candidates_by_meal, meal_targets)
 
-    # 4. Rescale every meal's portions precisely in code (no AI)
-    for day in raw_plan.days:
-        day.breakfast = [PlannedMealItem(**i) for i in _rescale_items(day.breakfast, meal_targets["breakfast"], food_lookup)]
-        day.lunch = [PlannedMealItem(**i) for i in _rescale_items(day.lunch, meal_targets["lunch"], food_lookup)]
-        day.dinner = [PlannedMealItem(**i) for i in _rescale_items(day.dinner, meal_targets["dinner"], food_lookup)]
-        day.snacks = [PlannedMealItem(**i) for i in _rescale_items(day.snacks, meal_targets["snacks"], food_lookup)]
-    if not any(
-        day.breakfast or day.lunch or day.dinner or day.snacks
-        for day in raw_plan.days
-    ):
-        logger.warning("Structured meal plan contained no valid foods; using fallback.")
-        raw_plan = _fallback_plan(candidates_by_meal, meal_targets)
-        for day in raw_plan.days:
-            day.breakfast = [
-                PlannedMealItem(**i)
-                for i in _rescale_items(
-                    day.breakfast, meal_targets["breakfast"], food_lookup
-                )
-            ]
-            day.lunch = [
-                PlannedMealItem(**i)
-                for i in _rescale_items(
-                    day.lunch, meal_targets["lunch"], food_lookup
-                )
-            ]
-            day.dinner = [
-                PlannedMealItem(**i)
-                for i in _rescale_items(
-                    day.dinner, meal_targets["dinner"], food_lookup
-                )
-            ]
-            day.snacks = [
-                PlannedMealItem(**i)
-                for i in _rescale_items(
-                    day.snacks, meal_targets["snacks"], food_lookup
-                )
-            ]
+    # 4. Refill invalid slots, then rescale every meal precisely in code.
+    def refill_slot(items: list[PlannedMealItem], meal: str, day_number: int) -> list[PlannedMealItem]:
+        valid_items = [item for item in items if item.food_id in food_lookup]
+        if valid_items:
+            return valid_items
+        candidates = candidates_by_meal.get(meal, [])
+        if not candidates:
+            from app.services.food_filter_service import _default_foods
+            candidates = _default_foods("snack" if meal == "snacks" else meal, dietary_preferences)
+            for food in candidates:
+                food_lookup.setdefault(food["id"], food)
+        if not candidates:
+            return []
+        food = candidates[day_number % len(candidates)]
+        return [PlannedMealItem(
+            food_id=food["id"],
+            food_name=food["name"],
+            portion_grams=100,
+        )]
+
+    def rescale_day(day, day_number: int) -> None:
+        for meal, target in (
+            ("breakfast", meal_targets["breakfast"]),
+            ("lunch", meal_targets["lunch"]),
+            ("dinner", meal_targets["dinner"]),
+            ("snacks", meal_targets["snacks"]),
+        ):
+            items = refill_slot(getattr(day, meal), meal, day_number)
+            setattr(
+                day,
+                meal,
+                [PlannedMealItem(**item) for item in _rescale_items(items, target, food_lookup)],
+            )
+
+    for day_number, day in enumerate(raw_plan.days):
+        rescale_day(day, day_number)
 
     response = MealPlanResponse(
         user_id=req.user_id,

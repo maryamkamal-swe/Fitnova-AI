@@ -40,14 +40,16 @@ SAFE_MINIMUM_CALORIES = {
 }
 
 
-def calculate_bmr(weight: float, height: float, age: int, gender: Gender) -> float:
-    """Mifflin-St Jeor equation. weight in kg, height in cm."""
+def calculate_bmr(weight: float, height: float, age: int, gender: Gender | str) -> float:
+    """Calculate BMR consistently for all profile and meal-plan consumers."""
+    if not isinstance(gender, Gender):
+        gender = Gender(str(gender).lower())
     base = 10 * weight + 6.25 * height - 5 * age
     if gender == Gender.MALE:
-        return base + 5
+        return round(base + 5, 2)
     if gender == Gender.FEMALE:
-        return base - 161
-    return base - 78  # average of the male/female offsets
+        return round(base - 161, 2)
+    return round(base - 78, 2)
 
 
 def calculate_tdee(bmr: float, activity_level: ActivityLevel) -> float:

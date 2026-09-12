@@ -1,4 +1,5 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'dart:developer' as developer;
 import '../core/constants.dart';
 
 /// Secure token storage utility using FlutterSecureStorage.
@@ -16,17 +17,31 @@ class TokenStorage {
         key: AppConstants.tokenStorageKey,
         value: token.trim(),
       );
-    } catch (_) {
-      // Storage exceptions are caught silently without logging sensitive data
+    } catch (error, stackTrace) {
+      developer.log(
+        'Secure storage write failed',
+        name: 'fitnova.token_storage',
+        error: error,
+        stackTrace: stackTrace,
+      );
     }
   }
 
   Future<void> saveRefreshToken(String token) async {
     if (token.trim().isEmpty) return;
-    await _storage.write(
-      key: AppConstants.refreshTokenStorageKey,
-      value: token.trim(),
-    );
+    try {
+      await _storage.write(
+        key: AppConstants.refreshTokenStorageKey,
+        value: token.trim(),
+      );
+    } catch (error, stackTrace) {
+      developer.log(
+        'Secure refresh-token storage write failed',
+        name: 'fitnova.token_storage',
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
   }
 
   /// Retrieves the JWT token, or null if not stored or on error.
@@ -37,13 +52,29 @@ class TokenStorage {
         return token.trim();
       }
       return null;
-    } catch (_) {
+    } catch (error, stackTrace) {
+      developer.log(
+        'Secure token storage read failed',
+        name: 'fitnova.token_storage',
+        error: error,
+        stackTrace: stackTrace,
+      );
       return null;
     }
   }
 
   Future<String?> getRefreshToken() async {
-    return _storage.read(key: AppConstants.refreshTokenStorageKey);
+    try {
+      return await _storage.read(key: AppConstants.refreshTokenStorageKey);
+    } catch (error, stackTrace) {
+      developer.log(
+        'Secure refresh-token storage read failed',
+        name: 'fitnova.token_storage',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      return null;
+    }
   }
 
   /// Deletes the JWT token upon logout or session expiration.
@@ -51,8 +82,13 @@ class TokenStorage {
     try {
       await _storage.delete(key: AppConstants.tokenStorageKey);
       await _storage.delete(key: AppConstants.refreshTokenStorageKey);
-    } catch (_) {
-      // Catch storage error safely
+    } catch (error, stackTrace) {
+      developer.log(
+        'Secure storage delete failed',
+        name: 'fitnova.token_storage',
+        error: error,
+        stackTrace: stackTrace,
+      );
     }
   }
 

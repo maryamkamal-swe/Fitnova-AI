@@ -5,6 +5,7 @@ FastAPI backend for personalized fitness and nutrition coaching
 import asyncio
 import logging
 import sqlite3
+from uuid import uuid4
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from slowapi.errors import RateLimitExceeded
+from pymongo.errors import ConnectionFailure
 
 from .config import settings
 from .database import close_mongodb_connection, connect_to_mongodb, db
@@ -80,8 +82,8 @@ app = FastAPI(
     title="FitNova AI API",
     description="AI-powered personalized fitness and nutrition coaching system",
     version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url=None if settings.ENVIRONMENT.strip().lower() in {"production", "prod"} else "/docs",
+    redoc_url=None if settings.ENVIRONMENT.strip().lower() in {"production", "prod"} else "/redoc",
     lifespan=lifespan
 )
 app.state.limiter = limiter
@@ -134,14 +136,21 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 # Configure CORS from ALLOWED_ORIGINS and regex for hosted/local environments
-cors_origins = getattr(settings, "origins_list", []) or []
+cors_origins = getattr(settings, "origins_list", []) or [
+    "https://fitnova-ai-dv0n.onrender.com",
+    "http://localhost:3000",
+    "http://localhost:8000",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+    "http://10.0.2.2:8000",
+    "http://127.0.0.1:8000",
+]
 if not cors_origins:
-    logger.warning("ALLOWED_ORIGINS is empty; relying on allow_origin_regex")
+    logger.warning("ALLOWED_ORIGINS is empty; browser cross-origin requests are disabled")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_origin_regex=r"https?://.*\.onrender\.com|https?://(localhost|127\.0\.0\.1|10\.0\.2\.2)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -174,12 +183,24 @@ async def health_check():
             raise RuntimeError("Core services are not initialized")
         await db.client.admin.command("ping")
         await asyncio.to_thread(_check_sqlite_database)
-    except Exception:
-        logger.exception("Health check failed")
+    except (ConnectionFailure, OSError, RuntimeError, sqlite3.Error) as error:
+        error_id = uuid4().hex
+        logger.exception(
+            "Health check infrastructure failure [%s]: %s", error_id, error
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Core services are unavailable.",
+        ) from error
+    except Exception as error:
+        error_id = uuid4().hex
+        logger.exception(
+            "Health check unexpected failure [%s]: %s", error_id, error
         )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Core services are unavailable.",
+        ) from error
     return {"status": "ok", "mongodb": "connected", "sqlite": "available"}
 
 
@@ -207,7 +228,15 @@ async def global_exception_handler(request: Request, exc: Exception):
     """
     Global exception handler for unhandled errors
     """
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    error_id = uuid4().hex
+    logger.error(
+        "Unhandled exception [%s] on %s %s: %s",
+        error_id,
+        request.method,
+        request.url.path,
+        exc,
+        exc_info=True,
+    )
     
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

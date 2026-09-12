@@ -56,6 +56,7 @@ class NotificationResponse(BaseModel):
     sent_at: Optional[datetime] = None
     read_at: Optional[datetime] = None
     created_at: datetime
+    push_sent: bool = False
 
 
 class NotificationReadUpdate(BaseModel):

@@ -5,7 +5,7 @@ Handles daily progress logging and statistics
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import Optional, List
 from datetime import date, timedelta, datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from ..database import get_database
 from ..models.progress import ProgressCreate, ProgressResponse, ProgressStats, ProgressUpdate
 from ..services.progress_service import ProgressService
@@ -18,8 +18,19 @@ date_type = date
 
 
 class HydrationLogRequest(BaseModel):
-    liters: float = Field(..., ge=0, le=100)
-    date: Optional[date_type] = None
+    added_amount: Optional[float] = Field(default=None, gt=0, le=100)
+    liters: Optional[float] = Field(default=None, gt=0, le=100)
+    date: date_type
+
+    @model_validator(mode="after")
+    def require_added_amount(self):
+        if self.added_amount is None and self.liters is None:
+            raise ValueError("added_amount is required")
+        if self.added_amount is not None and self.liters is not None:
+            raise ValueError("Provide only added_amount")
+        if self.added_amount is None:
+            self.added_amount = self.liters
+        return self
 
 
 @router.post("", response_model=ProgressResponse, status_code=status.HTTP_201_CREATED)
@@ -121,6 +132,7 @@ async def get_today_progress(user_id: str = Depends(get_current_user_id)):
 
 @router.get("/hydration/today")
 async def get_today_hydration(
+    date_value: date_type = Query(..., alias="date"),
     user_id: str = Depends(get_current_user_id),
 ):
     """
@@ -129,8 +141,7 @@ async def get_today_hydration(
     Requires authentication.
     """
     collection = get_database().progress
-    today = date.today()
-    day_start = datetime.combine(today, datetime.min.time())
+    day_start = datetime.combine(date_value, datetime.min.time())
     day_end = day_start + timedelta(days=1)
     
     entry = await collection.find_one({
@@ -140,8 +151,8 @@ async def get_today_hydration(
     if not entry:
         entry = await collection.find_one({"user_id": user_id, "date": day_start})
     if not entry:
-        return {"liters": 0, "date": str(today)}
-    return {"liters": entry.get("water_intake", 0), "date": str(entry.get("date", today))}
+        return {"liters": 0, "date": str(date_value)}
+    return {"liters": entry.get("water_intake", 0), "date": str(date_value)}
 
 
 @router.get("/{progress_id}", response_model=ProgressResponse)
@@ -209,19 +220,23 @@ async def log_hydration(
     Requires authentication.
     """
     collection = get_database().progress
-    today = date.today()
-    entry_date = hydration_data.date or today
-    entry_datetime = datetime.combine(entry_date, datetime.min.time())
+    entry_datetime = datetime.combine(hydration_data.date, datetime.min.time())
 
     result = await collection.update_one(
         {"user_id": user_id, "date": entry_datetime},
         {
-            "$set": {"water_intake": hydration_data.liters, "updated_at": datetime.utcnow()},
+            "$inc": {"water_intake": hydration_data.added_amount},
+            "$set": {"updated_at": datetime.utcnow()},
             "$setOnInsert": {"created_at": datetime.utcnow(), "workout_completed": False},
         },
         upsert=True,
     )
-    return {"message": "Hydration logged successfully", "liters": hydration_data.liters}
+    entry = await collection.find_one({"user_id": user_id, "date": entry_datetime})
+    return {
+        "message": "Hydration logged successfully",
+        "liters": entry.get("water_intake", 0) if entry else 0,
+        "date": str(hydration_data.date),
+    }
 
 
 @router.get("/chart/weight")

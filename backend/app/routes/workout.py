@@ -31,8 +31,8 @@ async def generate(
 
 
 @router.get("/{user_id}", response_model=WorkoutPlanResponse, deprecated=True)
-@router.get("/current", response_model=WorkoutPlanResponse)
 @router.get("/me", response_model=WorkoutPlanResponse)
+@router.get("/current", response_model=WorkoutPlanResponse)
 async def get_current_plan(
     user_id: str | None = None,
     db=Depends(get_database),

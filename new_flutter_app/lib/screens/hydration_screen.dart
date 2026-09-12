@@ -19,12 +19,16 @@ class _HydrationScreenState extends State<HydrationScreen> {
   final ProfileService _profileService = ProfileService();
   final ProgressService _progressService = ProgressService();
   bool _isLoading = false;
+  bool _saving = false;
   String? _errorMessage;
 
   void _addWater(double amount) {
+    if (_saving) return;
     setState(() => _liters = (_liters + amount).clamp(0, 10));
-    _saveHydration();
+    _saveHydration(amount);
   }
+
+  String get _localDate => DateTime.now().toIso8601String().split('T').first;
 
   Future<void> _loadHydration() async {
     setState(() {
@@ -33,7 +37,7 @@ class _HydrationScreenState extends State<HydrationScreen> {
     });
     try {
       final results = await Future.wait([
-        _progressService.getTodayHydration(),
+        _progressService.getTodayHydration(date: _localDate),
         _profileService.getProfile(),
       ]);
       final data = results[0] as Map<String, dynamic>;
@@ -56,15 +60,20 @@ class _HydrationScreenState extends State<HydrationScreen> {
     }
   }
 
-  Future<void> _saveHydration() async {
+  Future<void> _saveHydration(double amount) async {
+    setState(() => _saving = true);
     try {
-      await _progressService.logHydration(_liters);
+      final total = await _progressService.logHydration(amount, date: _localDate);
+      if (mounted) setState(() => _liters = total);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to save hydration')),
-        );
-      }
+      if (!mounted) return;
+      await _loadHydration();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to save hydration')),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
   }
 
@@ -130,13 +139,13 @@ class _HydrationScreenState extends State<HydrationScreen> {
               children: [0.25, 0.5, 0.75]
                   .map((amount) => ActionChip(
                         label: Text('+${amount.toStringAsFixed(2)}L'),
-                        onPressed: () => _addWater(amount),
+                        onPressed: _saving ? null : () => _addWater(amount),
                       ))
                   .toList(),
             ),
             const SizedBox(height: 20),
             FilledButton.icon(
-              onPressed: () => _addWater(0.25),
+              onPressed: _saving ? null : () => _addWater(0.25),
               icon: const Icon(Icons.water_drop_outlined),
               label: const Text('Log a glass'),
             ),

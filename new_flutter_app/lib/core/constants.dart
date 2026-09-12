@@ -11,10 +11,15 @@ class AppConstants {
 // Change this to your actual Render URL
   // Change this to your actual Render API URL
   static const String defaultBaseUrl = 'https://fitnova-ai-dv0n.onrender.com';
-  static const String apiBaseUrl = String.fromEnvironment(
-    'API_BASE_URL',
-    defaultValue: defaultBaseUrl,
+  static final String apiBaseUrl = _normalizeBaseUrl(
+    const String.fromEnvironment('API_BASE_URL', defaultValue: defaultBaseUrl),
   );
+
+  static String _normalizeBaseUrl(String value) {
+    final trimmed = value.trim().replaceFirst(RegExp(r'/+$'), '');
+    if (trimmed.isEmpty) return defaultBaseUrl;
+    return trimmed;
+  }
 
   // Endpoint Paths
   static const String loginEndpoint = '/api/v1/auth/login';

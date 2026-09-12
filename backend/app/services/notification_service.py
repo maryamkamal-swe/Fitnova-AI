@@ -3,6 +3,7 @@ Notification service for reminder and engagement messages.
 """
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, List
 
 from bson import ObjectId
@@ -10,6 +11,7 @@ from bson.errors import InvalidId
 from fastapi import HTTPException, status
 
 from ..database import get_database
+from ..config import settings
 from ..models.notification import (
     NotificationChannel,
     NotificationCreate,
@@ -172,16 +174,47 @@ class NotificationService:
         if notification.channel != NotificationChannel.PUSH:
             return True
 
+        if not settings.FIREBASE_CREDENTIALS_PATH:
+            logger.warning(
+                "Push notification skipped: Firebase credentials are not configured."
+            )
+            return False
+
         try:
             import firebase_admin
+            from firebase_admin import credentials
             from firebase_admin import messaging
-        except ImportError:
-            logger.warning("Firebase admin SDK is not installed. Notification stored only.")
+        except (ImportError, OSError, ValueError) as error:
+            logger.warning(
+                "Push notification skipped: Firebase setup is unavailable: %s",
+                error,
+            )
             return False
 
         if not firebase_admin._apps:
-            logger.warning("Firebase app is not initialized. Push notifications are disabled.")
-            return False
+            credential_path = Path(settings.FIREBASE_CREDENTIALS_PATH)
+            if not credential_path.is_file():
+                logger.warning(
+                    "Push notification skipped: Firebase credential file does not exist: %s",
+                    credential_path,
+                )
+                return False
+            try:
+                firebase_admin.initialize_app(
+                    credentials.Certificate(str(credential_path))
+                )
+            except (OSError, ValueError) as error:
+                logger.exception(
+                    "Firebase initialization failed due to invalid credentials or file access: %s",
+                    error,
+                )
+                return False
+            except Exception as error:
+                logger.exception(
+                    "Unexpected Firebase initialization failure: %s",
+                    error,
+                )
+                return False
 
         try:
             # Look up the user's target device token

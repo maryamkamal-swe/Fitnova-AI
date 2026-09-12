@@ -1,8 +1,10 @@
 """
 Custom validators for data validation
 """
-from datetime import date, datetime
+from datetime import date
 from typing import Optional
+
+from app.services.calorie_service import calculate_bmr
 
 
 def validate_date_range(start_date: Optional[date], end_date: Optional[date]) -> tuple:
@@ -89,30 +91,6 @@ def get_bmi_category(bmi: float) -> str:
         return "Overweight"
     else:
         return "Obese"
-
-
-def calculate_bmr(weight: float, height: float, age: int, gender: str) -> float:
-    """
-    Calculate Basal Metabolic Rate using Mifflin-St Jeor Equation
-    
-    Args:
-        weight: Weight in kg
-        height: Height in cm
-        age: Age in years
-        gender: Gender (male/female)
-    
-    Returns:
-        BMR in calories/day
-    """
-    # Mifflin-St Jeor Equation
-    bmr = 10 * weight + 6.25 * height - 5 * age
-    
-    if gender.lower() == "male":
-        bmr += 5
-    else:
-        bmr -= 161
-    
-    return round(bmr, 2)
 
 
 def calculate_tdee(bmr: float, activity_level: str) -> float:

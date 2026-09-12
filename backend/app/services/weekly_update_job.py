@@ -65,6 +65,7 @@ async def run_weekly_updates_for_user(db, user_id: str, default_location: Workou
     # --- Meal plan: log the weight-trend adjustment, then reuse the pipeline ---
     existing_meal_plan = await db.meal_plans.find_one({"user_id": user_id})
     weight_change = await get_weekly_avg_weight_change(db, user_id)
+    adjusted_target = None
 
     if existing_meal_plan and weight_change is not None:
         adjusted_target, reason = adjust_target_for_weight_trend(
@@ -73,16 +74,17 @@ async def run_weekly_updates_for_user(db, user_id: str, default_location: Workou
             fitness_goal=FitnessGoal(profile["fitness_goal"]),
             gender=Gender(profile["gender"]),
         )
-        # This adjustment is deterministic and can be surfaced to the user via
-        # a notification (see models/notification.py). The generation call below
-        # recomputes from profile.weight, so keep weight_kg/entries current via
-        # your progress-tracking feature for the two numbers to stay in sync.
         await db.meal_plan_adjustments.insert_one({
             "user_id": user_id, "new_target": adjusted_target, "reason": reason,
         })
 
     meal_req = MealPlanRequest(user_id=user_id, cuisine="desi")
-    await generate_weekly_meal_plan(db, meal_req, source="weekly_auto_update")
+    await generate_weekly_meal_plan(
+        db,
+        meal_req,
+        override_calorie_target=adjusted_target,
+        source="weekly_auto_update",
+    )
 
     # --- Workout plan: reuse the pipeline as-is ---
     workout_req = WorkoutPlanRequest(
@@ -96,4 +98,3 @@ async def run_weekly_updates_for_user(db, user_id: str, default_location: Workou
 async def run_weekly_updates_for_all_users(db, default_location: WorkoutLocation = WorkoutLocation.HOME):
     async for user in db.users.find({}, {"_id": 1}):
         await run_weekly_updates_for_user(db, str(user["_id"]), default_location)
-

@@ -2,6 +2,7 @@ import json
 import logging
 import re
 import sqlite3
+from uuid import uuid4
 from contextlib import closing
 from typing import Any, AsyncGenerator, Dict, List, Optional
 from pathlib import Path
@@ -136,6 +137,14 @@ def search_food_macros(food_query: str) -> str:
             """
             cursor.execute(query_str, params)
             rows = cursor.fetchall()
+    except (sqlite3.Error, OSError) as error:
+        error_id = uuid4().hex
+        logger.exception(
+            "Nutrition database infrastructure failure [%s]: %s",
+            error_id,
+            error,
+        )
+        return "Tool Message: Database temporarily unavailable. Fallback: Estimate values using general AI knowledge."
     except Exception as error:
         logger.warning(f"Nutrition DB lookup failed: {error}")
         return "Tool Message: Database temporarily unavailable. Fallback: Estimate values using general AI knowledge."
@@ -296,8 +305,31 @@ class RAGService:
                     "chat_history": history.messages[-self.max_history_messages :],
                 }
             )
-        except Exception as e:
-            logger.exception(f"agenerate_response failed: {e}")
+        except (TimeoutError, ConnectionError) as error:
+            error_id = uuid4().hex
+            logger.exception(
+                "RAG provider/infrastructure failure [%s]: %s",
+                error_id,
+                error,
+            )
+            return {
+                "answer": "The AI coach is busy right now. Please wait a moment and try again.",
+                "sources": [],
+            }
+        except (ValueError, TypeError) as error:
+            error_id = uuid4().hex
+            logger.exception(
+                "RAG response validation failure [%s]: %s", error_id, error
+            )
+            return {
+                "answer": "The AI coach is busy right now. Please wait a moment and try again.",
+                "sources": [],
+            }
+        except Exception as error:
+            error_id = uuid4().hex
+            logger.exception(
+                "Unexpected RAG generation failure [%s]: %s", error_id, error
+            )
             return {
                 "answer": "The AI coach is busy right now. Please wait a moment and try again.",
                 "sources": [],
@@ -382,8 +414,27 @@ class RAGService:
                     [HumanMessage(content=user_query), AIMessage(content=complete_text)]
                 )
 
-        except Exception as e:
-            logger.exception(f"Streaming failed due to: {e}")
+        except (TimeoutError, ConnectionError) as error:
+            error_id = uuid4().hex
+            logger.exception(
+                "Streaming RAG provider/infrastructure failure [%s]: %s",
+                error_id,
+                error,
+            )
+            yield f"data: {json.dumps({'content': 'The AI coach encountered an issue. Please try again.'})}\n\n"
+        except (ValueError, TypeError) as error:
+            error_id = uuid4().hex
+            logger.exception(
+                "Streaming RAG response validation failure [%s]: %s",
+                error_id,
+                error,
+            )
+            yield f"data: {json.dumps({'content': 'The AI coach encountered an issue. Please try again.'})}\n\n"
+        except Exception as error:
+            error_id = uuid4().hex
+            logger.exception(
+                "Unexpected streaming RAG failure [%s]: %s", error_id, error
+            )
             yield f"data: {json.dumps({'content': 'The AI coach encountered an issue. Please try again.'})}\n\n"
 
 

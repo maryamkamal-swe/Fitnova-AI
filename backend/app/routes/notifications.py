@@ -109,5 +109,5 @@ async def send_notification(
         )
 
     response = notification_service._format_notification_response(notification)
-    await notification_service.send_push_notification(user_id, response)
-    return response
+    push_sent = await notification_service.send_push_notification(user_id, response)
+    return response.model_copy(update={"push_sent": push_sent})

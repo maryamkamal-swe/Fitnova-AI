@@ -35,6 +35,7 @@ click
 
 # Voice Interaction Features
 SpeechRecognition==3.17.0
+pydub==0.25.1
 gTTS
 deep-translator==1.11.4
 langdetect==1.0.9

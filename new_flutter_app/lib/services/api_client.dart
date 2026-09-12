@@ -1,6 +1,7 @@
 // new_flutter_app/lib/services/api_client.dart
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
@@ -13,11 +14,13 @@ class ApiException implements Exception {
   final String message;
   final int? statusCode;
   final dynamic detail;
+  final String? category;
 
   const ApiException({
     required this.message,
     this.statusCode,
     this.detail,
+    this.category,
   });
 
   @override
@@ -275,7 +278,13 @@ class ApiClient {
       );
     } on ApiException {
       rethrow;
-    } catch (e) {
+    } catch (error, stackTrace) {
+      developer.log(
+        'Unexpected API client failure',
+        name: 'fitnova.api_client',
+        error: error,
+        stackTrace: stackTrace,
+      );
       throw const ApiException(
         message: 'An unexpected error occurred. Please try again.',
       );
@@ -295,8 +304,20 @@ class ApiClient {
         return null;
       }
       try {
-        return jsonDecode(response.body);
-      } catch (_) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map || decoded is List) {
+          return decoded;
+        }
+        return response.body;
+      } on FormatException {
+        return response.body;
+      } catch (error, stackTrace) {
+        developer.log(
+          'Unexpected API response decoding failure',
+          name: 'fitnova.api_client',
+          error: error,
+          stackTrace: stackTrace,
+        );
         return response.body;
       }
     }
@@ -410,7 +431,13 @@ class ApiClient {
         await _tokenStorage.saveRefreshToken(nextRefresh.trim());
       }
       return true;
-    } catch (_) {
+    } catch (error, stackTrace) {
+      developer.log(
+        'Access-token refresh failed',
+        name: 'fitnova.api_client',
+        error: error,
+        stackTrace: stackTrace,
+      );
       return false;
     }
   }

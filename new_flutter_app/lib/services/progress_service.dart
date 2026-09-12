@@ -74,19 +74,28 @@ class ProgressService {
   }
 
 /// Log water intake hydration entry
-  Future<void> logHydration(double liters) async {
-    await _apiClient.post(
+  Future<double> logHydration(double addedAmount, {required String date}) async {
+    final response = await _apiClient.post(
       '/api/v1/progress/hydration',
-      body: {'liters': liters},
+      body: {'added_amount': addedAmount, 'date': date},
       requiresAuth: true,
     );
+    if (response is! Map<String, dynamic>) {
+      throw const ApiException(message: 'Invalid hydration response.');
+    }
+    final liters = response['liters'];
+    if (liters is! num) {
+      throw const ApiException(message: 'Invalid hydration total.');
+    }
+    return liters.toDouble();
   }
 
   /// Get today's hydration entry
-  Future<Map<String, dynamic>> getTodayHydration() async {
+  Future<Map<String, dynamic>> getTodayHydration({required String date}) async {
     final response = await _apiClient.get(
       '/api/v1/progress/hydration/today',
       requiresAuth: true,
+      queryParameters: {'date': date},
     );
     if (response is! Map<String, dynamic>) {
       return {'liters': 0, 'date': ''};

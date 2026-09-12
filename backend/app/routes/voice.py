@@ -78,17 +78,39 @@ def _transcribe_audio(audio_data: str, language_code: str) -> str:
     try:
         with sr.AudioFile(io.BytesIO(audio_bytes)) as source:
             audio = recognizer.record(source)
-    except Exception:
-        # Fallback: If pydub is installed, convert incoming webm/ogg bytes to WAV on the fly
+    except (ValueError, OSError, RuntimeError) as wav_error:
+        logger.info(
+            "Audio is not directly readable as WAV; attempting WebM/OGG conversion: %s",
+            wav_error,
+        )
+        # Fallback: If pydub and FFmpeg are installed, convert WebM/OGG to WAV.
         try:
             from pydub import AudioSegment
+        except ImportError as import_error:
+            logger.warning(
+                "WebM/OGG voice input is unavailable because pydub is not installed. "
+                "Install pydub and FFmpeg to enable conversion."
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Must be WAV. WebM/OGG requires "
+                    "pydub and FFmpeg on the server."
+                ),
+            ) from import_error
+
+        try:
             audio_segment = AudioSegment.from_file(io.BytesIO(audio_bytes))
             wav_io = io.BytesIO()
             audio_segment.export(wav_io, format="wav")
             wav_io.seek(0)
             with sr.AudioFile(wav_io) as source:
                 audio = recognizer.record(source)
-        except Exception as conversion_error:
+        except (OSError, RuntimeError, ValueError) as conversion_error:
+            logger.exception(
+                "WebM/OGG audio conversion failed; FFmpeg may be missing or "
+                "the audio payload may be invalid."
+            )
             raise HTTPException(
                 status_code=400, 
                 detail="Invalid audio format. Ensure audio is recorded as WAV or configure pydub/ffmpeg for WebM conversion."
@@ -140,8 +162,8 @@ async def transcribe_audio(
         )
     except HTTPException:
         raise
-    except Exception:
-        logger.exception("Transcription error")
+    except (OSError, RuntimeError, ValueError) as error:
+        logger.exception("Voice transcription infrastructure/format error: %s", error)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while processing your request.",
@@ -204,8 +226,14 @@ async def voice_chat(
             success=True
         )
         
-    except Exception:
-        logger.exception("Voice chat error")
+    except (OSError, RuntimeError, TimeoutError) as error:
+        logger.exception("Voice chat infrastructure/provider error: %s", error)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while processing your request.",
+        ) from error
+    except Exception as error:
+        logger.exception("Voice chat unexpected error: %s", error)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while processing your request.",
@@ -232,19 +260,31 @@ async def text_to_speech(
         )
     except HTTPException:
         raise
-    except Exception:
-        logger.exception("TTS error")
+    except (OSError, RuntimeError, ValueError, TimeoutError) as error:
+        logger.exception("Text-to-speech provider/infrastructure error: %s", error)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while processing your request.",
+        ) from error
+    except Exception as error:
+        logger.exception("Text-to-speech unexpected error: %s", error)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while processing your request.",
         )
 @router.post("/speak")
 @limiter.limit("10/minute")
-async def get_spoken_text(request: Request, text: str, lang: str = "en"):
+async def get_spoken_text(
+    request: Request,
+    text: str,
+    lang: str = "en",
+    current_user: dict = Depends(get_current_user),
+):
     """
     Returns raw audio bytes directly with the correct media type 
     (audio/wav for English pyttsx3, audio/mpeg for gTTS other languages).
     """
+    logger.info("Legacy voice speech request from user %s", current_user["id"])
     audio_bytes = await asyncio.to_thread(generate_audio, text, lang)
     clean_lang = lang.split("-")[0].split("_")[0].lower()
     media_type = "audio/wav" if clean_lang == "en" else "audio/mpeg"

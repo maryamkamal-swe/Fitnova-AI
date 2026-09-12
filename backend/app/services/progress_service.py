@@ -68,6 +68,8 @@ class ProgressService:
 
         if existing:
             update_data = progress_data.model_dump(exclude_unset=True)
+            if "date" in update_data:
+                update_data["date"] = self._mongo_datetime(update_data["date"])
             await collection.update_one(
                 {"_id": existing["_id"]},
                 {"$set": update_data}
@@ -154,9 +156,16 @@ class ProgressService:
                 detail="No fields to update"
             )
 
+        if not ObjectId.is_valid(progress_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid progress ID"
+            )
+
+        progress_object_id = ObjectId(progress_id)
         result = await collection.update_one(
             {
-                "_id": ObjectId(progress_id),
+                "_id": progress_object_id,
                 "user_id": user_id
             },
             {"$set": update_data}
@@ -168,12 +177,18 @@ class ProgressService:
                 detail="Progress entry not found"
             )
 
-        updated = await collection.find_one({"_id": ObjectId(progress_id)})
+        updated = await collection.find_one({"_id": progress_object_id})
         return self._format_progress_response(updated)
 
     async def delete_progress(self, progress_id: str, user_id: str) -> bool:
         """Delete a progress entry."""
         collection = self._get_collection()
+        if not ObjectId.is_valid(progress_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid progress ID"
+            )
+
         result = await collection.delete_one({
             "_id": ObjectId(progress_id),
             "user_id": user_id
@@ -243,12 +258,17 @@ class ProgressService:
         goal_completion = [p.goal_completion for p in progress_list if p.goal_completion is not None]
         goal_completion_rate = sum(goal_completion) / len(goal_completion) if goal_completion else None
 
+        records_by_date = {p.date: p for p in progress_list}
+        current_date = date.today()
+        if current_date not in records_by_date:
+            current_date -= timedelta(days=1)
         workout_streak = 0
-        for p in sorted(progress_list, key=lambda x: x.date, reverse=True):
-            if p.workout_completed:
-                workout_streak += 1
-            else:
+        while True:
+            record = records_by_date.get(current_date)
+            if record is None or not record.workout_completed:
                 break
+            workout_streak += 1
+            current_date -= timedelta(days=1)
 
         return ProgressStats(
             total_workouts=total_workouts,
