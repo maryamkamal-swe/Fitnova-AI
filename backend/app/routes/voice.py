@@ -73,12 +73,27 @@ def _transcribe_audio(audio_data: str, language_code: str) -> str:
         raise HTTPException(status_code=400, detail="audio_data must be valid base64") from error
     
     recognizer = sr.Recognizer()
+    
+    # Try reading directly as a WAV file first
     try:
         with sr.AudioFile(io.BytesIO(audio_bytes)) as source:
             audio = recognizer.record(source)
-    except Exception as error:
-        raise HTTPException(status_code=400, detail="Invalid audio file format. Must be WAV.") from error
-        
+    except Exception:
+        # Fallback: If pydub is installed, convert incoming webm/ogg bytes to WAV on the fly
+        try:
+            from pydub import AudioSegment
+            audio_segment = AudioSegment.from_file(io.BytesIO(audio_bytes))
+            wav_io = io.BytesIO()
+            audio_segment.export(wav_io, format="wav")
+            wav_io.seek(0)
+            with sr.AudioFile(wav_io) as source:
+                audio = recognizer.record(source)
+        except Exception as conversion_error:
+            raise HTTPException(
+                status_code=400, 
+                detail="Invalid audio format. Ensure audio is recorded as WAV or configure pydub/ffmpeg for WebM conversion."
+            ) from conversion_error
+            
     try:
         return recognizer.recognize_google(audio, language=language_code)
     except sr.UnknownValueError as error:
@@ -227,12 +242,14 @@ async def text_to_speech(
 @limiter.limit("10/minute")
 async def get_spoken_text(request: Request, text: str, lang: str = "en"):
     """
-    Returns raw audio bytes directly, preventing playsound server crashes.
+    Returns raw audio bytes directly with the correct media type 
+    (audio/wav for English pyttsx3, audio/mpeg for gTTS other languages).
     """
-    # Using asyncio.to_thread prevents pyttsx3 from freezing the server
     audio_bytes = await asyncio.to_thread(generate_audio, text, lang)
+    clean_lang = lang.split("-")[0].split("_")[0].lower()
+    media_type = "audio/wav" if clean_lang == "en" else "audio/mpeg"
     
-    return Response(content=audio_bytes, media_type="audio/mpeg")
+    return Response(content=audio_bytes, media_type=media_type)
 
 @router.get("/health")
 async def voice_health_check():
