@@ -120,12 +120,35 @@ def _transcribe_audio(audio_data: str, language_code: str) -> str:
                 detail="Invalid audio format. Ensure audio is recorded as WAV or configure pydub/ffmpeg for WebM conversion."
             ) from conversion_error
             
-    try:
-        return recognizer.recognize_google(audio, language=language_code)
-    except sr.UnknownValueError as error:
-        raise HTTPException(status_code=422, detail="Audio could not be understood") from error
-    except sr.RequestError as error:
-        raise HTTPException(status_code=503, detail="Speech recognition service unavailable") from error
+    requested_language = language_code.strip() or "en-US"
+    language_candidates = [requested_language]
+    base_language = requested_language.split("-")[0].split("_")[0].lower()
+    if base_language != "en":
+        language_candidates.append("en-US")
+    if base_language != "ur":
+        language_candidates.append("ur-PK")
+
+    last_unknown_error = None
+    for candidate in dict.fromkeys(language_candidates):
+        try:
+            return recognizer.recognize_google(audio, language=candidate)
+        except sr.UnknownValueError as error:
+            last_unknown_error = error
+            logger.info(
+                "Speech was not recognized with language %s; trying the next "
+                "supported language.",
+                candidate,
+            )
+        except sr.RequestError as error:
+            raise HTTPException(
+                status_code=503,
+                detail="Speech recognition service unavailable",
+            ) from error
+
+    raise HTTPException(
+        status_code=422,
+        detail="Audio could not be understood",
+    ) from last_unknown_error
 
 
 def _synthesize_speech(text: str, language_code: str) -> str:

@@ -44,6 +44,20 @@ IN_SCOPE_PATTERN = re.compile(
     r"chai|cheeni|namak|tel|ghee|bhook|hazma|qabz)\b",
     re.IGNORECASE,
 )
+IN_SCOPE_TERMS = (
+    "fitness", "workout", "exercise", "training", "gym", "muscle", "strength",
+    "cardio", "nutrition", "food", "meal", "diet", "eat", "eating", "calorie",
+    "protein", "carb", "fat", "fiber", "fibre", "sugar", "sodium",
+    "cholesterol", "vitamin", "mineral", "ingredient", "portion", "serving",
+    "snack", "breakfast", "lunch", "dinner", "rice", "egg", "chicken", "milk",
+    "bread", "weight", "bmi", "sleep", "hydration", "water", "recovery",
+    "health", "wellness", "recipe", "body", "family", "household", "batch",
+    "cooking", "cooked", "ladle", "bowl", "estimate", "estimator", "macro",
+    "macros", "kcal", "sehat", "khana", "khurak", "nashta", "pani", "wazan",
+    "vazan", "charbi", "motapa", "faida", "kitna", "kitni", "kitne", "ghar",
+    "anda", "gosht", "murghi", "chawal", "doodh", "daal", "dal", "aloo",
+    "roti", "chai", "cheeni", "namak", "ghee", "bhook", "hazma", "qabz",
+)
 SAFETY_RESPONSE = "I can only assist with fitness, nutrition, and wellness topics."
 PROMPT_INJECTION_PATTERN = re.compile(
     r"(ignore\s+(?:all\s+|any\s+|the\s+)?previous\s+instructions?|"
@@ -135,12 +149,49 @@ def translate_query_to_english(
     source_language = _detect_query_language(query, language_code)
     if source_language == "en" or not query.strip():
         return normalize_roman_urdu(query)
+    if (
+        source_language in {"ur", "hi"}
+        and not re.search(r"[\u0600-\u06ff\u0900-\u097f]", query)
+        and not ROMAN_URDU_HINT_PATTERN.search(query)
+    ):
+        # A user may select Urdu/Hindi while speaking entirely in English.
+        return normalize_roman_urdu(query)
 
     from app.voice.translator import translate_to_english
 
     return normalize_roman_urdu(
         translate_to_english(query, source_language)
     )
+
+
+def _edit_distance(left: str, right: str) -> int:
+    previous = list(range(len(right) + 1))
+    for left_index, left_char in enumerate(left, start=1):
+        current = [left_index]
+        for right_index, right_char in enumerate(right, start=1):
+            current.append(
+                min(
+                    current[-1] + 1,
+                    previous[right_index] + 1,
+                    previous[right_index - 1] + (left_char != right_char),
+                )
+            )
+        previous = current
+    return previous[-1]
+
+
+def _has_fuzzy_in_scope_term(query: str) -> bool:
+    for token in re.findall(r"[a-z]+", query.lower()):
+        if len(token) < 4:
+            continue
+        max_distance = 2 if len(token) >= 7 else 1
+        if any(
+            abs(len(token) - len(term)) <= max_distance
+            and _edit_distance(token, term) <= max_distance
+            for term in IN_SCOPE_TERMS
+        ):
+            return True
+    return False
 
 
 def _food_query_from_text(query: str) -> str:
@@ -340,10 +391,9 @@ class RAGService:
 
     def is_query_off_topic(self, query: str) -> bool:
         query = normalize_roman_urdu(query)
-        return bool(
-            OUT_OF_SCOPE_PATTERN.search(query)
-            or not IN_SCOPE_PATTERN.search(query)
-        )
+        # Keep explicit off-topic blocking, but let the model handle natural
+        # language, spelling variants, and mixed Urdu-English questions.
+        return bool(OUT_OF_SCOPE_PATTERN.search(query))
 
     async def _history(
         self, user_id: str, session_id: str
