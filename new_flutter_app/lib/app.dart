@@ -81,7 +81,8 @@ class _FitNovaAppState extends State<FitNovaApp> {
       final parts = token.split('.');
       if (parts.length != 3) return false;
 
-      final payloadString = utf8.decode(base64Url.decode(base64Url.normalize(parts[1])));
+      final payloadString =
+          utf8.decode(base64Url.decode(base64Url.normalize(parts[1])));
       final payload = jsonDecode(payloadString);
 
       if (payload is! Map || !payload.containsKey('exp')) return false;
@@ -116,16 +117,13 @@ class _FitNovaAppState extends State<FitNovaApp> {
   }
 
   Future<void> _signOut() async {
-    try {
-      await _auth.logout();
-    } finally {
-      if (mounted) {
-        setState(() {
-          _authenticated = false;
-          _initialProfile = null;
-        });
-      }
+    if (mounted) {
+      setState(() {
+        _authenticated = false;
+        _initialProfile = null;
+      });
     }
+    await _auth.logout();
   }
 
   Widget _authenticatedHome() {
@@ -528,9 +526,9 @@ class _FitNovaShellState extends State<FitNovaShell> {
             selectedIndex: _index,
             labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
             onDestinationSelected: (i) => setState(() {
-              _index = i;
-              _refreshToken++;
-            }),
+                  _index = i;
+                  _refreshToken++;
+                }),
             destinations: const [
               NavigationDestination(
                   icon: Icon(Icons.grid_view_outlined),
@@ -685,8 +683,7 @@ class _DashboardPageState extends State<DashboardPage> {
 class ProgressPage extends StatefulWidget {
   final ProgressService service;
   final int refreshToken;
-  const ProgressPage(
-      {super.key, required this.service, this.refreshToken = 0});
+  const ProgressPage({super.key, required this.service, this.refreshToken = 0});
   @override
   State<ProgressPage> createState() => _ProgressPageState();
 }
