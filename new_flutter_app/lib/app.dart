@@ -80,15 +80,15 @@ class _FitNovaAppState extends State<FitNovaApp> {
     try {
       final parts = token.split('.');
       if (parts.length != 3) return false;
-      
+
       final payloadString = utf8.decode(base64Url.decode(base64Url.normalize(parts[1])));
       final payload = jsonDecode(payloadString);
-      
+
       if (payload is! Map || !payload.containsKey('exp')) return false;
-      
+
       final expiry = payload['exp'];
       if (expiry is! num) return false;
-      
+
       return DateTime.fromMillisecondsSinceEpoch(expiry.toInt() * 1000)
           .isAfter(DateTime.now());
     } catch (_) {
@@ -115,6 +115,19 @@ class _FitNovaAppState extends State<FitNovaApp> {
     });
   }
 
+  Future<void> _signOut() async {
+    try {
+      await _auth.logout();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _authenticated = false;
+          _initialProfile = null;
+        });
+      }
+    }
+  }
+
   Widget _authenticatedHome() {
     if (!_onboardingCompleted) {
       return AppWalkthroughScreen(onFinished: () {
@@ -124,14 +137,7 @@ class _FitNovaAppState extends State<FitNovaApp> {
     return FitNovaShell(
       api: _api,
       initialProfile: _initialProfile,
-      onLogout: () async {
-        await _auth.logout();
-        if (!mounted) return;
-        setState(() {
-          _authenticated = false;
-          _initialProfile = null;
-        });
-      },
+      onLogout: _signOut,
     );
   }
 
@@ -218,14 +224,7 @@ class _FitNovaAppState extends State<FitNovaApp> {
                 api: _api,
                 initialProfile:
                     arguments is UserProfile ? arguments : _initialProfile,
-                onLogout: () async {
-                  await _auth.logout();
-                  if (!mounted) return;
-                  setState(() {
-                    _authenticated = false;
-                    _initialProfile = null;
-                  });
-                },
+                onLogout: _signOut,
               );
             },
             AppConstants.profileSetupRoute: (context) {
@@ -239,6 +238,7 @@ class _FitNovaAppState extends State<FitNovaApp> {
             },
             AppConstants.profileRoute: (_) => ProfileScreen(
                   profileService: ProfileService(apiClient: _api),
+                  onLogout: _signOut,
                 ),
             AppConstants.notificationsRoute: (_) => NotificationsScreen(
                   notificationService: NotificationService(apiClient: _api),
