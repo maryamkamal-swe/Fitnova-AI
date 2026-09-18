@@ -1,4 +1,3 @@
-// new_flutter_app/lib/services/api_client.dart
 import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
@@ -34,6 +33,10 @@ class ApiClient {
   final String _baseUrl;
   final void Function()? onSessionExpired;
 
+  // Prevent multiple simultaneous requests from refreshing the same
+  // access token independently and revoking each other's refresh token.
+  Future<bool>? _refreshFuture;
+
   ApiClient({
     http.Client? client,
     TokenStorage? tokenStorage,
@@ -47,14 +50,29 @@ class ApiClient {
   void close() => _client.close();
 
   /// Builds the full URI for the given endpoint or path.
-  Uri _buildUri(String path, [Map<String, dynamic>? queryParameters]) {
+  Uri _buildUri(
+    String path, [
+    Map<String, dynamic>? queryParameters,
+  ]) {
     final base = _baseUrl.endsWith('/')
-        ? _baseUrl.substring(0, _baseUrl.length - 1)
+        ? _baseUrl.substring(
+            0,
+            _baseUrl.length - 1,
+          )
         : _baseUrl;
-    final cleanPath = path.startsWith('/') ? path : '/$path';
-    return Uri.parse('$base$cleanPath').replace(
-      queryParameters:
-          queryParameters?.map((k, v) => MapEntry(k, v?.toString() ?? '')),
+
+    final cleanPath =
+        path.startsWith('/') ? path : '/$path';
+
+    return Uri.parse(
+      '$base$cleanPath',
+    ).replace(
+      queryParameters: queryParameters?.map(
+        (k, v) => MapEntry(
+          k,
+          v?.toString() ?? '',
+        ),
+      ),
     );
   }
 
@@ -69,10 +87,25 @@ class ApiClient {
     };
 
     if (requiresAuth) {
-      final token = await _tokenStorage.getToken();
-      if (token != null && token.isNotEmpty) {
-        headers['Authorization'] = 'Bearer $token';
+      final token =
+          await _tokenStorage.getToken();
+
+      // Do not silently send protected requests without
+      // credentials. This avoids FastAPI HTTPBearer returning
+      // 403 "Not authenticated" while the app still behaves
+      // as if a session exists.
+      if (token == null || token.isEmpty) {
+        onSessionExpired?.call();
+
+        throw const ApiException(
+          message:
+              'Your session has expired. Please log in again.',
+          statusCode: 401,
+        );
       }
+
+      headers['Authorization'] =
+          'Bearer $token';
     }
 
     if (extraHeaders != null) {
@@ -91,12 +124,23 @@ class ApiClient {
   }) async {
     return _sendRequest(
       () async {
-        final uri = _buildUri(path, queryParameters);
-        final headers = await _buildHeaders(
-            requiresAuth: requiresAuth, extraHeaders: extraHeaders);
+        final uri =
+            _buildUri(path, queryParameters);
+
+        final headers =
+            await _buildHeaders(
+          requiresAuth: requiresAuth,
+          extraHeaders: extraHeaders,
+        );
+
         return await _client
-            .get(uri, headers: headers)
-            .timeout(AppConstants.requestTimeout);
+            .get(
+              uri,
+              headers: headers,
+            )
+            .timeout(
+              AppConstants.requestTimeout,
+            );
       },
       requiresAuth: requiresAuth,
     );
@@ -112,13 +156,29 @@ class ApiClient {
   }) async {
     return _sendRequest(
       () async {
-        final uri = _buildUri(path, queryParameters);
-        final headers = await _buildHeaders(
-            requiresAuth: requiresAuth, extraHeaders: extraHeaders);
-        final encodedBody = body != null ? jsonEncode(body) : null;
+        final uri =
+            _buildUri(path, queryParameters);
+
+        final headers =
+            await _buildHeaders(
+          requiresAuth: requiresAuth,
+          extraHeaders: extraHeaders,
+        );
+
+        final encodedBody =
+            body != null
+                ? jsonEncode(body)
+                : null;
+
         return await _client
-            .post(uri, headers: headers, body: encodedBody)
-            .timeout(AppConstants.requestTimeout);
+            .post(
+              uri,
+              headers: headers,
+              body: encodedBody,
+            )
+            .timeout(
+              AppConstants.requestTimeout,
+            );
       },
       requiresAuth: requiresAuth,
     );
@@ -130,43 +190,86 @@ class ApiClient {
     bool requiresAuth = true,
   }) async* {
     try {
-      final request = http.Request('POST', _buildUri(path));
-      request.headers.addAll(await _buildHeaders(
-        requiresAuth: requiresAuth,
-        extraHeaders: const {
-          'Accept': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-        },
-      ));
-      if (body != null) request.body = jsonEncode(body);
+      final request =
+          http.Request(
+        'POST',
+        _buildUri(path),
+      );
+
+      request.headers.addAll(
+        await _buildHeaders(
+          requiresAuth: requiresAuth,
+          extraHeaders: const {
+            'Accept':
+                'text/event-stream',
+            'Cache-Control': 'no-cache',
+          },
+        ),
+      );
+
+      if (body != null) {
+        request.body = jsonEncode(body);
+      }
+
       final response =
-          await _client.send(request).timeout(AppConstants.requestTimeout);
-      if (response.statusCode == 401 && requiresAuth) {
-        final refreshed = await _refreshAccessToken();
+          await _client
+              .send(request)
+              .timeout(
+                AppConstants.requestTimeout,
+              );
+
+      if (response.statusCode == 401 &&
+          requiresAuth) {
+        final refreshed =
+            await _refreshAccessToken();
+
         if (refreshed) {
-          yield* postSse(path, body: body, requiresAuth: requiresAuth);
+          yield* postSse(
+            path,
+            body: body,
+            requiresAuth: requiresAuth,
+          );
           return;
         }
+
         await _tokenStorage.deleteToken();
         onSessionExpired?.call();
       }
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        final bodyText = await response.stream.bytesToString();
+
+      if (response.statusCode < 200 ||
+          response.statusCode >= 300) {
+        final bodyText =
+            await response.stream
+                .bytesToString();
+
         throw ApiException(
           message:
-              _extractErrorMessage(bodyText) ?? 'The streaming request failed.',
-          statusCode: response.statusCode,
+              _extractErrorMessage(
+                    bodyText,
+                  ) ??
+                  'The streaming request failed.',
+          statusCode:
+              response.statusCode,
         );
       }
-      await for (final line in response.stream
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())) {
+
+      await for (final line
+          in response.stream
+              .transform(
+                utf8.decoder,
+              )
+              .transform(
+                const LineSplitter(),
+              )) {
         if (line.startsWith('data:')) {
-          final data = line.substring(5).trim();
+          final data =
+              line.substring(5).trim();
+
           if (data.isNotEmpty) {
             yield data;
           }
-        } else if (line.isNotEmpty && !line.startsWith(':')) {
+        } else if (line.isNotEmpty &&
+            !line.startsWith(':')) {
           yield line;
         }
       }
@@ -174,11 +277,19 @@ class ApiClient {
       rethrow;
     } on TimeoutException {
       throw const ApiException(
-          message: 'The request took too long. Please try again.');
+        message:
+            'The request took too long. Please try again.',
+      );
     } on SocketException {
-      throw const ApiException(message: 'Unable to connect to the server.');
+      throw const ApiException(
+        message:
+            'Unable to connect to the server.',
+      );
     } on http.ClientException {
-      throw const ApiException(message: 'Unable to connect to the server.');
+      throw const ApiException(
+        message:
+            'Unable to connect to the server.',
+      );
     }
   }
 
@@ -191,13 +302,29 @@ class ApiClient {
   }) async {
     return _sendRequest(
       () async {
-        final uri = _buildUri(path);
-        final headers = await _buildHeaders(
-            requiresAuth: requiresAuth, extraHeaders: extraHeaders);
-        final encodedBody = body != null ? jsonEncode(body) : null;
+        final uri =
+            _buildUri(path);
+
+        final headers =
+            await _buildHeaders(
+          requiresAuth: requiresAuth,
+          extraHeaders: extraHeaders,
+        );
+
+        final encodedBody =
+            body != null
+                ? jsonEncode(body)
+                : null;
+
         return await _client
-            .patch(uri, headers: headers, body: encodedBody)
-            .timeout(AppConstants.requestTimeout);
+            .patch(
+              uri,
+              headers: headers,
+              body: encodedBody,
+            )
+            .timeout(
+              AppConstants.requestTimeout,
+            );
       },
       requiresAuth: requiresAuth,
     );
@@ -212,13 +339,29 @@ class ApiClient {
   }) async {
     return _sendRequest(
       () async {
-        final uri = _buildUri(path);
-        final headers = await _buildHeaders(
-            requiresAuth: requiresAuth, extraHeaders: extraHeaders);
-        final encodedBody = body != null ? jsonEncode(body) : null;
+        final uri =
+            _buildUri(path);
+
+        final headers =
+            await _buildHeaders(
+          requiresAuth: requiresAuth,
+          extraHeaders: extraHeaders,
+        );
+
+        final encodedBody =
+            body != null
+                ? jsonEncode(body)
+                : null;
+
         return await _client
-            .put(uri, headers: headers, body: encodedBody)
-            .timeout(AppConstants.requestTimeout);
+            .put(
+              uri,
+              headers: headers,
+              body: encodedBody,
+            )
+            .timeout(
+              AppConstants.requestTimeout,
+            );
       },
       requiresAuth: requiresAuth,
     );
@@ -232,12 +375,23 @@ class ApiClient {
   }) async {
     return _sendRequest(
       () async {
-        final uri = _buildUri(path);
-        final headers = await _buildHeaders(
-            requiresAuth: requiresAuth, extraHeaders: extraHeaders);
+        final uri =
+            _buildUri(path);
+
+        final headers =
+            await _buildHeaders(
+          requiresAuth: requiresAuth,
+          extraHeaders: extraHeaders,
+        );
+
         return await _client
-            .delete(uri, headers: headers)
-            .timeout(AppConstants.requestTimeout);
+            .delete(
+              uri,
+              headers: headers,
+            )
+            .timeout(
+              AppConstants.requestTimeout,
+            );
       },
       requiresAuth: requiresAuth,
     );
@@ -245,14 +399,21 @@ class ApiClient {
 
   /// Executes request with comprehensive timeout, network, and status error handling.
   Future<dynamic> _sendRequest(
-    Future<http.Response> Function() requestFn, {
+    Future<http.Response> Function()
+        requestFn, {
     required bool requiresAuth,
     bool retried = false,
   }) async {
     try {
-      final response = await requestFn();
-      if (response.statusCode == 401 && requiresAuth && !retried) {
-        final refreshed = await _refreshAccessToken();
+      final response =
+          await requestFn();
+
+      if (response.statusCode == 401 &&
+          requiresAuth &&
+          !retried) {
+        final refreshed =
+            await _refreshAccessToken();
+
         if (refreshed) {
           return await _sendRequest(
             requestFn,
@@ -261,10 +422,15 @@ class ApiClient {
           );
         }
       }
-      return await _handleResponse(response, requiresAuth: requiresAuth);
+
+      return await _handleResponse(
+        response,
+        requiresAuth: requiresAuth,
+      );
     } on TimeoutException {
       throw const ApiException(
-        message: 'The request took too long. Please try again.',
+        message:
+            'The request took too long. Please try again.',
       );
     } on SocketException {
       throw const ApiException(
@@ -285,8 +451,10 @@ class ApiClient {
         error: error,
         stackTrace: stackTrace,
       );
+
       throw const ApiException(
-        message: 'An unexpected error occurred. Please try again.',
+        message:
+            'An unexpected error occurred. Please try again.',
       );
     }
   }
@@ -296,18 +464,28 @@ class ApiClient {
     http.Response response, {
     required bool requiresAuth,
   }) async {
-    final statusCode = response.statusCode;
+    final statusCode =
+        response.statusCode;
 
     // Successful responses
-    if (statusCode >= 200 && statusCode < 300) {
-      if (statusCode == 204 || response.body.trim().isEmpty) {
+    if (statusCode >= 200 &&
+        statusCode < 300) {
+      if (statusCode == 204 ||
+          response.body
+              .trim()
+              .isEmpty) {
         return null;
       }
+
       try {
-        final decoded = jsonDecode(response.body);
-        if (decoded is Map || decoded is List) {
+        final decoded =
+            jsonDecode(response.body);
+
+        if (decoded is Map ||
+            decoded is List) {
           return decoded;
         }
+
         return response.body;
       } on FormatException {
         return response.body;
@@ -318,6 +496,7 @@ class ApiClient {
           error: error,
           stackTrace: stackTrace,
         );
+
         return response.body;
       }
     }
@@ -328,8 +507,13 @@ class ApiClient {
         await _tokenStorage.deleteToken();
         onSessionExpired?.call();
       }
-      final errorMsg = _extractErrorMessage(response.body) ??
-          'Invalid or expired session. Please log in again.';
+
+      final errorMsg =
+          _extractErrorMessage(
+                response.body,
+              ) ??
+              'Invalid or expired session. Please log in again.';
+
       throw ApiException(
         message: errorMsg,
         statusCode: 401,
@@ -338,7 +522,8 @@ class ApiClient {
 
     if (statusCode == 429) {
       throw const ApiException(
-        message: 'Too many requests. Please wait a moment and try again.',
+        message:
+            'Too many requests. Please wait a moment and try again.',
         statusCode: 429,
       );
     }
@@ -346,90 +531,211 @@ class ApiClient {
     // 500 Internal Server Error handling
     if (statusCode >= 500) {
       throw const ApiException(
-        message: 'Something went wrong on the server. Please try again later.',
+        message:
+            'Something went wrong on the server. Please try again later.',
         statusCode: 500,
       );
     }
 
     // Client errors (400, 404, 422, etc.)
-    final extractedError = _extractErrorMessage(response.body);
-    final fallbackMessage = statusCode == 404
-        ? 'Requested resource not found.'
-        : 'Request failed. Please check your input and try again.';
+    final extractedError =
+        _extractErrorMessage(
+      response.body,
+    );
+
+    final fallbackMessage =
+        statusCode == 404
+            ? 'Requested resource not found.'
+            : 'Request failed. Please check your input and try again.';
 
     throw ApiException(
-      message: extractedError ?? fallbackMessage,
+      message:
+          extractedError ?? fallbackMessage,
       statusCode: statusCode,
     );
   }
 
-  /// Safely extracts error details from FastAPI {"detail": ...} or {"message": ...} formats.
-  String? _extractErrorMessage(String responseBody) {
-    if (responseBody.trim().isEmpty) return null;
+  /// Safely extracts error details from FastAPI {"detail": ...}
+  /// or {"message": ...} formats.
+  String? _extractErrorMessage(
+    String responseBody,
+  ) {
+    if (responseBody.trim().isEmpty) {
+      return null;
+    }
 
     try {
-      final decoded = jsonDecode(responseBody);
-      if (decoded is Map<String, dynamic>) {
-        if (decoded.containsKey('detail')) {
-          final detail = decoded['detail'];
-          if (detail is String && detail.trim().isNotEmpty) {
+      final decoded =
+          jsonDecode(responseBody);
+
+      if (decoded
+          is Map<String, dynamic>) {
+        if (decoded
+            .containsKey('detail')) {
+          final detail =
+              decoded['detail'];
+
+          if (detail is String &&
+              detail.trim().isNotEmpty) {
             return detail.trim();
           }
-          if (detail is List && detail.isNotEmpty) {
-            final first = detail.first;
-            if (first is Map && first.containsKey('msg')) {
-              return first['msg'].toString();
+
+          if (detail is List &&
+              detail.isNotEmpty) {
+            final first =
+                detail.first;
+
+            if (first is Map &&
+                first.containsKey(
+                  'msg',
+                )) {
+              return first['msg']
+                  .toString();
             }
-            return detail.map((e) => e.toString()).join('\n');
+
+            return detail
+                .map(
+                  (e) => e.toString(),
+                )
+                .join('\n');
           }
         }
-        if (decoded.containsKey('message')) {
-          final msg = decoded['message'];
-          if (msg is String && msg.trim().isNotEmpty) {
+
+        if (decoded
+            .containsKey('message')) {
+          final msg =
+              decoded['message'];
+
+          if (msg is String &&
+              msg.trim().isNotEmpty) {
             return msg.trim();
           }
         }
-        if (decoded.containsKey('error') && decoded['error'] is Map) {
-          final errorObj = decoded['error'];
-          if (errorObj.containsKey('message') && errorObj['message'] is String) {
-            return errorObj['message'].toString().trim();
+
+        if (decoded.containsKey(
+                'error') &&
+            decoded['error'] is Map) {
+          final errorObj =
+              decoded['error'];
+
+          if (errorObj.containsKey(
+                  'message') &&
+              errorObj['message']
+                  is String) {
+            return errorObj['message']
+                .toString()
+                .trim();
           }
         }
       }
     } catch (_) {
-      // Body is not JSON
+      // Body is not JSON.
     }
+
     return null;
   }
 
-  Future<bool> _refreshAccessToken() async {
-    final refreshToken = await _tokenStorage.getRefreshToken();
-    if (refreshToken == null || refreshToken.isEmpty) return false;
+  Future<bool> _refreshAccessToken() {
+    // Reuse an in-flight refresh operation.
+    // This prevents two simultaneous expired requests
+    // from both trying to rotate the same refresh token.
+    final existing =
+        _refreshFuture;
+
+    if (existing != null) {
+      return existing;
+    }
+
+    final future =
+        _performRefreshAccessToken();
+
+    _refreshFuture = future;
+
+    future.whenComplete(() {
+      if (identical(
+        _refreshFuture,
+        future,
+      )) {
+        _refreshFuture = null;
+      }
+    });
+
+    return future;
+  }
+
+  Future<bool> _performRefreshAccessToken() async {
+    final refreshToken =
+        await _tokenStorage
+            .getRefreshToken();
+
+    if (refreshToken == null ||
+        refreshToken.isEmpty) {
+      return false;
+    }
+
     try {
-      final response = await _client
-          .post(
-            _buildUri(AppConstants.refreshEndpoint),
-            headers: const {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-            body: jsonEncode({'refresh_token': refreshToken}),
-          )
-          .timeout(AppConstants.requestTimeout);
-      if (response.statusCode < 200 || response.statusCode >= 300) {
+      final response =
+          await _client
+              .post(
+                _buildUri(
+                  AppConstants
+                      .refreshEndpoint,
+                ),
+                headers: const {
+                  'Content-Type':
+                      'application/json',
+                  'Accept':
+                      'application/json',
+                },
+                body: jsonEncode({
+                  'refresh_token':
+                      refreshToken,
+                }),
+              )
+              .timeout(
+                AppConstants.requestTimeout,
+              );
+
+      if (response.statusCode < 200 ||
+          response.statusCode >= 300) {
         return false;
       }
-      final decoded = jsonDecode(response.body);
-      if (decoded is! Map<String, dynamic>) return false;
-      final access =
-          (decoded['access_token'] ?? decoded['accessToken'])?.toString();
-      if (access == null || access.trim().isEmpty) return false;
-      await _tokenStorage.saveToken(access.trim());
-      final nextRefresh =
-          (decoded['refresh_token'] ?? decoded['refreshToken'])?.toString();
-      if (nextRefresh != null && nextRefresh.trim().isNotEmpty) {
-        await _tokenStorage.saveRefreshToken(nextRefresh.trim());
+
+      final decoded =
+          jsonDecode(response.body);
+
+      if (decoded
+          is! Map<String, dynamic>) {
+        return false;
       }
+
+      final access =
+          (decoded['access_token'] ??
+                  decoded['accessToken'])
+              ?.toString();
+
+      if (access == null ||
+          access.trim().isEmpty) {
+        return false;
+      }
+
+      await _tokenStorage.saveToken(
+        access.trim(),
+      );
+
+      final nextRefresh =
+          (decoded['refresh_token'] ??
+                  decoded['refreshToken'])
+              ?.toString();
+
+      if (nextRefresh != null &&
+          nextRefresh.trim().isNotEmpty) {
+        await _tokenStorage
+            .saveRefreshToken(
+          nextRefresh.trim(),
+        );
+      }
+
       return true;
     } catch (error, stackTrace) {
       developer.log(
@@ -438,6 +744,7 @@ class ApiClient {
         error: error,
         stackTrace: stackTrace,
       );
+
       return false;
     }
   }
